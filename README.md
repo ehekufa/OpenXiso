@@ -205,16 +205,22 @@ NDK `27.0.12077973`, CMake `3.22.1`, затем `assembleDebug` и `assembleRele
 Скачать из CLI на своей машине: `gh run download <run-id> -n openxiso-debug-apk`.
 Отдельный job `native-tests` перед сборкой гоняет тесты C-ядра на обычном gcc.
 
-**Проверенный зелёный запуск с эмуляцией El Torito:** [41795897135](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135)
-— собраны `app-debug.apk` (1,2 МБ) и `app-release-unsigned.apk` (1,1 МБ).
+**Проверенный зелёный запуск с выбором разрядности:** [41815756135](https://github.com/ehekufa/OpenXiso/actions/runs/41815756135)
+— собраны `app-debug.apk` (1,3 МБ) и `app-release-unsigned.apk` (1,1 МБ).
 Job `native-tests` выполнил 27 проверок ядра, 28 проверок реальной загрузки BIOS
-(включая эмуляцию дискеты и поиск `KERNEL.BIN`) и отдельный прогон под
-ASan/UBSan. Шаг «Проверка состава APK» подтвердил `classes.dex` (6044 Б),
-`AndroidManifest.xml` (2576 Б), `resources.arsc` (8608 Б) и
-`lib/<abi>/libopenxiso.so` для всех трёх ABI: `arm64-v8a` 451568 Б,
-`armeabi-v7a` 271020 Б, `x86_64` 435384 Б. Прямые ссылки на артефакты:
-[debug](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135/artifacts/13304888913),
-[release](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135/artifacts/13304933788).
+(El Torito, эмуляция дискеты, поиск `KERNEL.BIN`) и 20 проверок настоящих
+режимов i386/x86-64, плюс два прогона под ASan/UBSan. Шаг «Проверка состава APK»
+подтвердил `classes.dex` (6472 Б), `AndroidManifest.xml` (2576 Б),
+`resources.arsc` (9388 Б) и `lib/<abi>/libopenxiso.so` для всех трёх ABI:
+`arm64-v8a` 478512 Б, `armeabi-v7a` 287604 Б, `x86_64` 461384 Б.
+Контрольные суммы zip-артефактов: debug
+`93523719c70de96573f4c09403cf53e8c096f0f0b09330ad81d9c56e8c2ad7b3`, release
+`8f2d4420c7fced4db0d8677f9c605cc26ffbb457afef779ee5a7d77c6fce73d1`.
+Прямые ссылки:
+[debug](https://github.com/ehekufa/OpenXiso/actions/runs/41815756135/artifacts/13314149416),
+[release](https://github.com/ehekufa/OpenXiso/actions/runs/41815756135/artifacts/13314368352).
+
+Предыдущий зелёный запуск с исправлением El Torito — [41795897135](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135).
 
 > Из песочницы агента артефакт скачать нельзя: хост blob-хранилища GitHub закрыт
 > сетевыми ограничениями, а токен не имеет права `actions: write` для ручного
