@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервный фон кнопки «Создать»; состояния и ripple уточняются в MainActivity.java. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/blue" />
+    <corners android:radius="20dp" />
+</shape>

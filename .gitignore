@@ -1,0 +1,19 @@
+# Локальные и сгенерированные файлы, не попадающие в репозиторий.
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/captures/
+.externalNativeBuild
+.cxx/
+/build/
+/app/build/
+/app/release/
+/app/debug/
+/build/
+*.apk
+*.aab
+*.keystore
+*.so
+app/src/main/cpp/tests/test_core

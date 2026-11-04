@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Резервное копирование: выбранные Uri не сохраняются, чтобы не переносить
+     недоступные на другом устройстве ссылки Storage Access Framework. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="." />
+</full-backup-content>

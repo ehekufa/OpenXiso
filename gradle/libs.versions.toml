@@ -1,0 +1,6 @@
+# Каталог версий: после перехода на Java + NDK нужен только Android Gradle Plugin.
+[versions]
+agp = "8.7.3"
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }

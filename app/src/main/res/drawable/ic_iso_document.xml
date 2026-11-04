@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Векторный значок документа образа: светлая страница, тонкий синий контур,
+     сложенный угол и строки содержимого. Без теней и градиентов. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- Контур страницы -->
+    <path
+        android:fillColor="#FFF8F9FA"
+        android:pathData="M12,4 L29,4 L37,12 L37,40 A4,4 0 0 1 33,44 L12,44 A4,4 0 0 1 8,40 L8,8 A4,4 0 0 1 12,4 Z"
+        android:strokeColor="#FF1A73E8"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <!-- Сложенный верхний угол -->
+    <path
+        android:fillColor="#FFF1F3F4"
+        android:pathData="M29,4 L29,12 L37,12 Z"
+        android:strokeColor="#FF1A73E8"
+        android:strokeLineJoin="round"
+        android:strokeWidth="2" />
+
+    <!-- Строки содержимого файла -->
+    <path
+        android:fillColor="#FF1A73E8"
+        android:pathData="M14,21 H34 V23 H14 Z" />
+    <path
+        android:fillColor="#FFDADCE0"
+        android:pathData="M14,27 H34 V29 H14 Z" />
+    <path
+        android:fillColor="#FFDADCE0"
+        android:pathData="M14,33 H28 V35 H14 Z" />
+</vector>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Все строки интерфейса — на русском языке. Низкоуровневые сообщения
+     загрузчика и тексты ошибок validation приходят из C-ядра уже на русском. -->
+<resources>
+    <string name="app_name">OpenXiso</string>
+
+    <!-- Загрузчик -->
+    <string name="boot_progress_description">Инициализация системы</string>
+    <string name="boot_step">Шаг %1$d из %2$d</string>
+
+    <!-- Рабочее пространство -->
+    <string name="workspace_subtitle">Виртуальные машины и образы дисков</string>
+    <string name="workspace_counter">Конфигураций: %1$d</string>
+    <string name="action_create_configuration">Создать конфигурацию</string>
+
+    <!-- Модальное окно -->
+    <string name="dialog_title">Новая конфигурация</string>
+    <string name="dialog_description">Укажите название системы и выберите файл образа диска.</string>
+    <string name="label_os_name">Название операционной системы</string>
+    <string name="placeholder_os_name">Например, Ubuntu 24.04</string>
+    <string name="file_picker_hint">Нажмите здесь, чтобы выбрать файл образа (.iso, .img)</string>
+    <string name="file_selected">Выбран файл: %1$s</string>
+    <string name="image_info">Образ: %1$s</string>
+    <string name="content_description_document">Значок файла образа</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_create">Создать</string>
+    <string name="error_form_incomplete">Заполните название системы и выберите файл образа</string>
+</resources>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Передний план адаптивного значка: белый «плюс» в безопасной зоне 108x108 dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M50,36 h8 v16 h16 v8 h-16 v16 h-8 v-16 h-16 v-8 h16 z" />
+</vector>

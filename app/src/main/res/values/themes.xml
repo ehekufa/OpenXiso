@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Плоская светлая системная тема: белый фон и тёмные значки панелей. -->
+<resources>
+    <style name="Base.Theme.OpenXiso" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="android:statusBarColor">@color/surface</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/surface</item>
+        <item name="android:colorAccent">@color/blue</item>
+    </style>
+
+    <style name="Theme.OpenXiso" parent="Base.Theme.OpenXiso" />
+</resources>

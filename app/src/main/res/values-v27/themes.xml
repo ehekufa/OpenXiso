@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Тёмные значки панели навигации доступны начиная с API 27. -->
+<resources>
+    <style name="Theme.OpenXiso" parent="Base.Theme.OpenXiso">
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>
