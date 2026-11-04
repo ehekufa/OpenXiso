@@ -84,8 +84,22 @@ NDK `27.0.12077973`, CMake `3.22.1`, затем `assembleDebug` и `assembleRele
 
 **Где забрать APK:** откройте нужный запуск во вкладке **Actions** → блок
 **Artifacts** → `openxiso-debug-apk` / `openxiso-release-apk` (хранятся 30 дней).
-Скачать из CLI: `gh run download <run-id> -n openxiso-debug-apk`.
+Скачать из CLI на своей машине: `gh run download <run-id> -n openxiso-debug-apk`.
 Отдельный job `native-tests` перед сборкой гоняет тесты C-ядра на обычном gcc.
+
+**Проверенный зелёный запуск:** [41779458771](https://github.com/ehekufa/OpenXiso/actions/runs/41779458771)
+— собраны `app-debug.apk` (846 КБ) и `app-release-unsigned.apk` (711 КБ).
+Шаг «Проверка состава APK» подтвердил `classes.dex`, `AndroidManifest.xml`,
+`resources.arsc` и `lib/<abi>/libopenxiso.so` для `arm64-v8a`, `armeabi-v7a`,
+`x86_64`; итоговая таблица пишется в Job Summary. Прямые ссылки на артефакты:
+[debug](https://github.com/ehekufa/OpenXiso/actions/runs/41779458771/artifacts/13298776000),
+[release](https://github.com/ehekufa/OpenXiso/actions/runs/41779458771/artifacts/13297723875).
+
+> Из песочницы агента артефакт скачать нельзя: хост blob-хранилища GitHub закрыт
+> сетевыми ограничениями, а токен не имеет права `actions: write` для ручного
+> `gh workflow run` (403). В браузере и на вашей машине оба ограничения отсутствуют:
+> кнопка **Run workflow** и скачивание APK работают. Push на ветку сборку запускает
+> всегда — именно так она и была проверена.
 
 ---
 
