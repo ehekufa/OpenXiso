@@ -25,4 +25,27 @@
     <string name="action_cancel">Отмена</string>
     <string name="action_create">Создать</string>
     <string name="error_form_incomplete">Заполните название системы и выберите файл образа</string>
+
+    <!-- Экран настоящего эмулятора: VGA-консоль собственного Legacy BIOS -->
+    <string name="emulator_title">Консоль Legacy BIOS</string>
+    <string name="emulator_subtitle">Реальный режим x86 · 1 МБ ОЗУ · VGA 80×25</string>
+    <string name="emulator_screen_description">Экран виртуального персонального компьютера</string>
+    <string name="emulator_log_label">Журнал POST и сервисов BIOS</string>
+    <string name="emulator_state">Состояние: %1$s · исполнено инструкций: %2$d</string>
+    <string name="emulator_state_idle">ожидание запуска</string>
+    <string name="emulator_state_running">выполняется</string>
+    <string name="emulator_state_halted">загрузчик выполнил HLT</string>
+    <string name="emulator_state_error">ошибка процессора</string>
+    <string name="emulator_state_waiting">ожидание клавиши INT 16h</string>
+    <string name="emulator_input_hint">Символы для клавиатуры BIOS</string>
+    <string name="emulator_action_send">Отправить</string>
+    <string name="emulator_action_pause">Пауза</string>
+    <string name="emulator_action_resume">Продолжить</string>
+    <string name="emulator_action_stop">Остановить</string>
+    <string name="emulator_error_open">Не удалось открыть образ через Storage Access Framework</string>
+    <string name="emulator_error_engine">Не удалось создать виртуальный PC</string>
+    <string name="emulator_error_image">Образ не принят: %1$s</string>
+    <string name="emulator_error_start">Не удалось выполнить POST собственного BIOS</string>
+    <string name="emulator_error_cpu">Ошибка ЦПУ: %1$s</string>
+    <string name="emulator_tile_hint">Запустить: %1$s</string>
 </resources>

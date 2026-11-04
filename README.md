@@ -9,8 +9,13 @@ Google Material 3. Теперь проект написан **на Java + C + C+
   (`ACTION_OPEN_DOCUMENT`, `ContentResolver`, `OpenableColumns`,
   `ParcelFileDescriptor`, передача файлового дескриптора в нативный код);
 * **C (C11)** — ядро: состояние, флаги, цикл инициализации, валидация, список
-  конфигураций и чтение образа (ISO 9660 / сигнатура `0x55AA`);
+  конфигураций, чтение образа, **интерпретатор x86 реального режима**, разбор
+  El Torito / MBR, виртуальный PC (1 МБ ОЗУ, VGA 80×25, порты, клавиатура) и
+  **собственный маленький Legacy BIOS** (ROM, IVT, POST, сервисы INT);
 * **C++ (C++17)** — только тонкий мост JNI без бизнес-логики.
+
+Это **не интерфейс-имитация**: приложение исполняет настоящие 16-битные машинные
+коды загрузочного сектора. Прошивка написана с нуля — не SeaBIOS и не чужая ROM.
 
 Kotlin и Jetpack Compose из проекта удалены. Все комментарии, сообщения журнала,
 тексты ошибок и строки интерфейса — на русском языке; идентификаторы — на английском.
@@ -37,19 +42,31 @@ OpenXiso/
         ├── AndroidManifest.xml
         ├── java/com/openxiso/app/
         │   ├── MainActivity.java       ← ИНТЕРФЕЙС + SAF + Handler-цикл загрузки
+        │   ├── EmulatorActivity.java   ← КОНСОЛЬ эмулятора: VGA-экран и INT 16h
         │   ├── EmulatorUiState.java    ← UI-флаги, Bundle, синхронизация с ядром
         │   ├── NativeBridge.java       ← native-методы и владелец движка
         │   └── UiKit.java              ← фабрика View, форм, обводок и ripple
         ├── cpp/
         │   ├── CMakeLists.txt          ← сборка libopenxiso.so
-        │   ├── include/openxiso_core.h ← публичный C-API ядра
-        │   ├── openxiso_core.c         ← ЯДРО: состояние, цикл, ISO 9660
-        │   ├── openxiso_jni.cpp        ← МОСТ JNI (C++17)
+        │   ├── include/openxiso_core.h ← C-API ядра конфигураций
+        │   ├── include/x86_cpu.h       ← C-API интерпретатора 8086/186
+        │   ├── include/boot_image.h    ← план загрузки El Torito / MBR
+        │   ├── include/pc_machine.h    ← виртуальный PC и экран 80x25
+        │   ├── include/legacy_bios.h   ← собственный Legacy BIOS
+        │   ├── openxiso_core.c         ← состояние, цикл, ISO 9660
+        │   ├── x86_cpu.c               ← РЕАЛЬНЫЕ инструкции: ModRM, ALU, INT
+        │   ├── boot_image.c            ← PVD, каталог El Torito, MBR, pread
+        │   ├── legacy_bios.c           ← ROM F0000, IVT, POST, INT 10h/13h/16h/19h
+        │   ├── pc_machine.c            ← 1 МБ ОЗУ, VGA CP866→UTF-8, порты, клавиши
+        │   ├── openxiso_jni.cpp        ← МОСТ JNI конфигураций (C++17)
+        │   ├── emulator_jni.cpp        ← МОСТ JNI виртуального PC (C++17)
         │   └── tests/
         │       ├── test_core.c         ← хостовые тесты ядра на gcc
+        │       ├── test_emulator.c     ← СИНТЕТИЧЕСКИЙ El Torito-ISO + MBR, реальный boot
         │       └── Makefile
         └── res/
             ├── layout/activity_main.xml          ← загрузчик + рабочее пространство
+            ├── layout/activity_emulator.xml     ← консоль настоящего эмулятора
             ├── layout/dialog_configuration.xml  ← модальное окно 28 dp
             ├── drawable/                        ← «плюс», ISO-документ, bg_dialog,
             │                                     bg_file_box (пунктир), bg_brand_mark,
@@ -65,6 +82,57 @@ preview/index.html                  ← справочный HTML-макет д�
 Studio — файлы уже на своих местах, дополнительно ничего переносить не нужно.
 Нативная библиотека собирается автоматически (`externalNativeBuild`) и попадает
 в APK как `lib/<abi>/libopenxiso.so`.
+
+---
+
+## Настоящий эмулятор и свой маленький Legacy BIOS
+
+Реализовано с нуля, без внешних прошивок и без библиотек эмуляции:
+
+| Компонент | Что делает |
+| --- | --- |
+| `x86_cpu.c` | Интерпретатор реального режима 8086/186: сегменты, 1 МБ плоской памяти, ModRM, префиксы, ALU, флаги, стек, строковые операции, сдвиги, порты ввода-вывода, `INT`, `IRET`, `HLT` |
+| `boot_image.c` | Читает через `pread` PVD ISO 9660 (сектор 16), boot record (сектор 17), каталог El Torito, initial/validation entry, либо MBR с `0x55AA`; строит план загрузки и размер сектора 2048/512 |
+| `legacy_bios.c` | ROM по `F0000`, 256 настоящих машинных заглушек в IVT, POST `F000:FE00`, вектор сброса `F000:FFF0`, BDA, подпись `OpenXiso Little Legacy BIOS 0.1`, сервисы `INT 10h` (VGA-текст), `13h` (CHS + EDD `41h/42h/48h`), `16h`, `19h`, а также `08h/11h/12h/15h/1Ah/1Ch` |
+| `pc_machine.c` | 1 МБ ОЗУ, VGA 80×25 с переводом CP866→UTF-8, очередь клавиш, COM1, порты `0x60/0x64/0x3F8/0x3FD/0x510/0x511/0xCF9`, срез исполнения, русскоязычный журнал POST |
+| `EmulatorActivity.java` | SAF открывает образ и удерживает `ParcelFileDescriptor`; фоновый поток исполняет инструкции, главный поток рисует 25 строк VGA, журнал и счётчик инструкций; клавиши уходят в `INT 16h` |
+
+**Как устроена честная загрузка.** `INT 19h` читает загрузчик по плану
+El Torito/MBR в `0000:7C00`, выставляет `DL = 0xE0` для ISO или `0x80` для MBR
+и передаёт управление far-jmp. Загрузчик печатает через `INT 10h` и читает диск
+через `INT 13h AH=42h`. Firmware-хук CPU получает `INT` до кадра `iret`, поэтому
+`CF` от дискового сервиса не затирается восстановлением FLAGS, а `AL` не портится
+ROM-заглушкой; сами заглушки остаются реальными машинными кодами в IVT и
+сохранены как совместимый путь через порт `0x510`.
+
+**Как проверить без телефона:**
+
+```bash
+make -C app/src/main/cpp/tests run
+# Проверок: 27, ошибок: 0        ← тесты ядра конфигураций
+# Состояние: 2, инструкций: 269  ← El Torito: POST → загрузчик → INT 10h → INT 13h → HLT
+# Проверок: 18, ошибок: 0        ← MBR, INT 16h и ожидание клавиши
+```
+
+`test_emulator.c` сам собирает ISO 9660 с валидным каталогом El Torito, образ с
+MBR и два 16-битных загрузчика из машинных кодов, затем проверяет баннер BIOS,
+строку загрузчика, успешное расширенное чтение LBA, останов по `HLT`, ветку MBR,
+а также ожидание клавиши `INT 16h` и продолжение исполнения после неё. В CI тот
+же тест дополнительно прогоняется под ASan/UBSan.
+
+**Как запустить в приложении:** создайте конфигурацию через SAF, затем нажмите на
+её плитку — откроется консоль Legacy BIOS. Кнопки «Пауза», «Продолжить»,
+«Остановить» управляют циклом ЦПУ, поле ввода и аппаратная клавиатура кладут
+символы в очередь `INT 16h` (младший байт — ASCII в `AL`, старший — скан-код в `AH`).
+Ядро читает образ через `pread`, поэтому Java проверяет дескриптор SAF на
+позиционируемость: если провайдер отдал неseekable pipe (облачные диски), документ
+временно копируется в кэш приложения и удаляется при закрытии консоли.
+
+> Ограничение честно: это 16-битный реальный режим без защищённого режима,
+> без PCI/IDE-контроллера и без графических режимов VGA. Загрузчики, которым
+> нужен 32-битный protected mode, APM/ACPI или драйверы устройств, здесь не
+> запустятся — для них нужен полноценный PC-эмулятор. Зато MBR/El Torito-стадия,
+> POST, IVT, сервисы BIOS и VGA-текст работают по-настоящему.
 
 ---
 
@@ -114,7 +182,8 @@ export ANDROID_HOME=/путь/к/Android/Sdk
 ./scripts/build.sh release    # release
 ```
 
-Скрипт проверит компоненты SDK, запустит хостовые тесты ядра и выведет путь к APK.
+Скрипт проверит компоненты SDK, запустит хостовые тесты ядра и реальной загрузки
+BIOS, затем выведет путь к APK.
 Либо вручную:
 
 1. Android Studio Ladybug или новее, **JDK 17**, Android SDK 35.
@@ -125,11 +194,13 @@ export ANDROID_HOME=/путь/к/Android/Sdk
 **Готовый APK:** `app/build/outputs/apk/debug/app-debug.apk`
 Release: `./gradlew :app:assembleRelease` → `app/build/outputs/apk/release/app-release-unsigned.apk`.
 
-Хостовые тесты C-ядра не требуют Android SDK и уже проверены в песочнице:
+Хостовые тесты C-ядра и эмулятора не требуют Android SDK и уже проверены
+в песочнице:
 
 ```bash
 make -C app/src/main/cpp/tests run
 # Проверок: 27, ошибок: 0
+# Проверок: 18, ошибок: 0
 ```
 
 ---
@@ -149,6 +220,9 @@ make -C app/src/main/cpp/tests run
 | Выбор `.iso` / `.img` с телефона (SAF) | `MainActivity.openDocumentPicker()` / `onActivityResult()` |
 | Чтение выбранного файла | Java открывает `ParcelFileDescriptor`, C читает `fd` через `pread` |
 | Проверка расширения и тексты ошибок | `openxiso_draft_select_image()` → `statusMessage()` |
+| Настоящая загрузка El Torito / MBR | `boot_image.c` + `legacy_bios.c` + `x86_cpu.c` |
+| Собственный Legacy BIOS (ROM/IVT/POST/INT) | `legacy_bios.c`, firmware-хук `X86Cpu.interrupt_hook` |
+| VGA-экран 80×25 и клавиатура INT 16h | `activity_emulator.xml` + `EmulatorActivity.java` |
 
 ### Путь файла от телефона до C
 

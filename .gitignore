@@ -18,3 +18,4 @@
 *.keystore
 *.so
 app/src/main/cpp/tests/test_core
+app/src/main/cpp/tests/test_emulator

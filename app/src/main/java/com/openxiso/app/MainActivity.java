@@ -7,15 +7,22 @@ package com.openxiso.app;
  *
  * Этот файл кладём в:  app/src/main/java/com/openxiso/app/MainActivity.java
  * Рядом с ним лежат:   EmulatorUiState.java  — флаги экрана и Bundle
+ *                      EmulatorActivity.java — консоль настоящего эмулятора
  *                      NativeBridge.java     — объявления JNI + владелец движка
  *                      UiKit.java            — фабрика View, форм и ripple
  *
  * Нативный код (C и C++ вместе):
- *   app/src/main/cpp/include/openxiso_core.h  — публичный C-API ядра
+ *   app/src/main/cpp/include/openxiso_core.h  — публичный C-API ядра конфигураций
  *   app/src/main/cpp/openxiso_core.c          — состояние, цикл загрузки, ISO 9660
- *   app/src/main/cpp/openxiso_jni.cpp         — мост JNI (C++17)
+ *   app/src/main/cpp/include/x86_cpu.h        — интерпретатор реального режима 8086
+ *   app/src/main/cpp/x86_cpu.c                — настоящие машинные коды, ModRM, INT
+ *   app/src/main/cpp/boot_image.c             — разбор El Torito / MBR, чтение через fd
+ *   app/src/main/cpp/legacy_bios.c            — СОБСТВЕННЫЙ маленький Legacy BIOS
+ *   app/src/main/cpp/pc_machine.c             — 1 МБ ОЗУ, VGA 80x25, порты, клавиатура
+ *   app/src/main/cpp/openxiso_jni.cpp         — мост JNI конфигураций (C++17)
+ *   app/src/main/cpp/emulator_jni.cpp         — мост JNI виртуального PC (C++17)
  *   app/src/main/cpp/CMakeLists.txt           — сборка libopenxiso.so
- *   app/src/main/cpp/tests/                   — тесты ядра обычным gcc (без NDK)
+ *   app/src/main/cpp/tests/                   — тесты ядра И реальной загрузки (gcc)
  *
  * Разметка и ресурсы:
  *   app/src/main/res/layout/activity_main.xml            — загрузчик + рабочее пространство
@@ -32,7 +39,9 @@ package com.openxiso.app;
  * РАЗДЕЛЕНИЕ ОБЯЗАННОСТЕЙ (как и просили):
  *   Java  — весь интерфейс и ЗАГРУЗКА ФАЙЛОВ ИЗ ТЕЛЕФОНА: ACTION_OPEN_DOCUMENT,
  *           ContentResolver, OpenableColumns, ParcelFileDescriptor, передача fd в C.
- *   C     — состояние, флаги, проверки, список конфигураций и чтение образа.
+ *           Плитка конфигурации запускает EmulatorActivity с настоящим эмулятором.
+ *   C     — состояние, флаги, проверки, список конфигураций, чтение образа,
+ *           интерпретатор x86, El Torito/MBR, ROM/IVT/POST и сервисы INT BIOS.
  *   C++   — только мост JNI без бизнес-логики.
  *
  * Все комментарии, сообщения журнала и строки интерфейса — на русском языке,
@@ -248,9 +257,12 @@ public final class MainActivity extends Activity {
         workspaceGrid.removeAllViews();
         final int count = NativeBridge.getConfigurationCount(engine);
         for (int index = 0; index < count; index++) {
-            workspaceGrid.addView(UiKit.createConfigurationTile(this,
-                    NativeBridge.getConfigurationOsName(engine, index),
-                    NativeBridge.getConfigurationFileName(engine, index)));
+            final String osName = NativeBridge.getConfigurationOsName(engine, index);
+            final String imageUri = NativeBridge.getConfigurationImageUri(engine, index);
+            workspaceGrid.addView(UiKit.createConfigurationTile(this, osName,
+                    NativeBridge.getConfigurationFileName(engine, index),
+                    view -> startActivity(EmulatorActivity.launchIntent(
+                            MainActivity.this, osName, imageUri))));
         }
         workspaceGrid.addView(UiKit.createPlusTile(
                 this, view -> showConfigurationDialog()));

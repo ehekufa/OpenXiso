@@ -16,6 +16,13 @@ public final class NativeBridge {
     /** Код успешного выполнения (OPENXISO_OK из openxiso_core.h). */
     public static final int STATUS_OK = 0;
 
+    /* Состояния виртуального PC (PcMachineStatus из pc_machine.h). */
+    public static final int EMULATOR_IDLE = 0;
+    public static final int EMULATOR_RUNNING = 1;
+    public static final int EMULATOR_HALTED = 2;
+    public static final int EMULATOR_ERROR = 3;
+    public static final int EMULATOR_WAITING = 4;
+
     static {
         System.loadLibrary("openxiso");
     }
@@ -94,4 +101,37 @@ public final class NativeBridge {
     static native void resetDraft(long handle);
 
     static native String statusMessage(int status);
+
+    /*
+     * Настоящий эмулятор: интерпретатор x86 real mode + собственный Legacy BIOS.
+     * machine — отдельный нативный дескриптор, не зависящий от engineHandle;
+     * дескриптор файла образа открывает Java через SAF и удерживает открытым.
+     */
+    static native long emulatorCreate();
+
+    static native void emulatorDestroy(long machine);
+
+    static native int emulatorLoadImage(long machine, int fd, long size);
+
+    static native int emulatorStart(long machine);
+
+    static native int emulatorRunSlice(long machine, int instructions);
+
+    /** 25 строк VGA-текста 80x25 в UTF-8, разделённые '\n'. */
+    static native String emulatorScreen(long machine);
+
+    static native int emulatorStatus(long machine);
+
+    static native String emulatorLog(long machine);
+
+    static native String emulatorError(long machine);
+
+    /** Младший байт — ASCII в AL, старший — скан-код в AH. */
+    static native void emulatorPushKey(long machine, int scanAndAscii);
+
+    static native void emulatorStop(long machine);
+
+    static native long emulatorInstructions(long machine);
+
+    static native String emulatorFirmware();
 }

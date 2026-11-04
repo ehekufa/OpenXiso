@@ -1,20 +1,26 @@
-# Хостовые тесты C-ядра: обычный gcc, без Android SDK/NDK.
-# Запуск из корня репозитория: make -C app/src/main/cpp/tests
+# Хостовые тесты C-ядра и эмулятора: обычный gcc, без Android SDK/NDK.
+# Запуск из корня репозитория: make -C app/src/main/cpp/tests run
 CC ?= gcc
-CFLAGS ?= -std=c11 -Wall -Wextra -O2
+CFLAGS ?= -std=c11 -Wall -Wextra -Wpedantic -O2
 INCLUDES := -I../include
-SOURCES := ../openxiso_core.c test_core.c
-TARGET := test_core
+CORE_SOURCES := ../openxiso_core.c test_core.c
+EMU_SOURCES := ../openxiso_core.c ../x86_cpu.c ../boot_image.c \
+               ../legacy_bios.c ../pc_machine.c test_emulator.c
+HEADERS := $(wildcard ../include/*.h)
 
 .PHONY: all run clean
 
-all: $(TARGET)
+all: test_core test_emulator
 
-$(TARGET): $(SOURCES) ../include/openxiso_core.h
-	$(CC) $(CFLAGS) $(INCLUDES) $(SOURCES) -o $(TARGET)
+test_core: $(CORE_SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(INCLUDES) $(CORE_SOURCES) -o test_core
 
-run: $(TARGET)
-	./$(TARGET)
+test_emulator: $(EMU_SOURCES) $(HEADERS)
+	$(CC) $(CFLAGS) $(INCLUDES) $(EMU_SOURCES) -o test_emulator
+
+run: all
+	./test_core
+	./test_emulator
 
 clean:
-	rm -f $(TARGET)
+	rm -f test_core test_emulator

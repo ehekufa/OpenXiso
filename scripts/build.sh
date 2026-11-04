@@ -53,7 +53,7 @@ if [[ "${INSTALL_SDK_COMPONENTS:-1}" == "1" && -n "$SDKMANAGER" ]]; then
         "cmake;3.22.1" > /dev/null
 fi
 
-echo "Запуск хостовых тестов C-ядра..."
+echo "Запуск хостовых тестов C-ядра и реальной загрузки El Torito/MBR..."
 make -C app/src/main/cpp/tests run
 
 chmod +x gradlew

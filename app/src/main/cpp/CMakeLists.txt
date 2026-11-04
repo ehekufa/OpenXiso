@@ -10,9 +10,15 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Эмулятор реального режима, разбор El Torito/MBR, виртуальный PC и свой BIOS.
 add_library(openxiso SHARED
         openxiso_core.c
-        openxiso_jni.cpp)
+        x86_cpu.c
+        boot_image.c
+        legacy_bios.c
+        pc_machine.c
+        openxiso_jni.cpp
+        emulator_jni.cpp)
 
 target_include_directories(openxiso PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include)

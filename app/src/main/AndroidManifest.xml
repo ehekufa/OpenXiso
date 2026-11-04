@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Манифест приложения: одна Java-активность, системная тема без ActionBar.
+<!-- Манифест приложения: две Java-активности, системная тема без ActionBar.
+     MainActivity — конфигурации, EmulatorActivity — консоль настоящего эмулятора.
      Нативная библиотека libopenxiso.so подключается через JNI из NativeBridge.java. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -22,6 +23,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".EmulatorActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>

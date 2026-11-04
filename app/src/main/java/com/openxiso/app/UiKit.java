@@ -89,15 +89,21 @@ final class UiKit {
         return tile;
     }
 
-    /** Плитка созданной конфигурации в той же сетке 120 dp. */
-    static FrameLayout createConfigurationTile(Context context, String osName, String fileName) {
+    /** Плитка созданной конфигурации: нажатие запускает настоящий эмулятор. */
+    static FrameLayout createConfigurationTile(Context context, String osName,
+                                               String fileName,
+                                               View.OnClickListener listener) {
         final FrameLayout tile = new FrameLayout(context);
         tile.setLayoutParams(tileParams(context));
-        tile.setBackground(roundedRect(context,
+        tile.setBackground(ripple(Color.argb(41, 26, 115, 232), roundedRect(context,
                 color(context, R.color.secondary),
                 color(context, R.color.outline),
                 16f,
-                dp(context, 1)));
+                dp(context, 1))));
+        tile.setClickable(true);
+        tile.setFocusable(true);
+        tile.setContentDescription(context.getString(R.string.emulator_tile_hint, osName));
+        tile.setOnClickListener(listener);
 
         final LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
