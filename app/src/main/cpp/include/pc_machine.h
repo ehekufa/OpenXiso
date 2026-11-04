@@ -55,6 +55,8 @@ typedef struct PcMachine {
 
     char log_lines[OPENXISO_LOG_CAPACITY][192];
     int log_count;
+    char log_last[192];      /* базовая строка для свёртки повторов */
+    int log_repeat;
     char log_snapshot[OPENXISO_LOG_CAPACITY * 200];
     char error[192];
 

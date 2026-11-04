@@ -37,7 +37,7 @@
     <string name="emulator_state_halted">загрузчик выполнил HLT</string>
     <string name="emulator_state_error">ошибка процессора</string>
     <string name="emulator_state_waiting">ожидание клавиши INT 16h</string>
-    <string name="emulator_input_hint">Символы для клавиатуры BIOS</string>
+    <string name="emulator_input_hint">Символы для клавиатуры BIOS (латиница и кириллица)</string>
     <string name="emulator_action_send">Отправить</string>
     <string name="emulator_action_pause">Пауза</string>
     <string name="emulator_action_resume">Продолжить</string>

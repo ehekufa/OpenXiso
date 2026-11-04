@@ -182,6 +182,30 @@ void legacy_bios_log(PcMachine* machine, const char* format, ...) {
     vsnprintf(line, sizeof(line), format, arguments);
     va_end(arguments);
 
+    /*
+     * Загрузчик может сделать сотни одинаковых чтений INT 13h. Сворачиваем
+     * повторы в одну строку со счётчиком, иначе журнал на экране становится
+     * бесполезным и вытесняет сообщения POST.
+     */
+    if (machine->log_count > 0 && machine->log_repeat < 9999 &&
+        strcmp(machine->log_last, line) == 0) {
+        machine->log_repeat += 1;
+        char suffix[24];
+        snprintf(suffix, sizeof(suffix), " ×%d", machine->log_repeat + 1);
+        const size_t capacity = sizeof(machine->log_lines[0]);
+        const size_t suffix_length = strlen(suffix);
+        size_t base = strlen(line);
+        if (base + suffix_length >= capacity) {
+            base = capacity - suffix_length - 1u;
+        }
+        char* target = machine->log_lines[machine->log_count - 1];
+        memcpy(target, line, base);
+        memcpy(target + base, suffix, suffix_length + 1u);
+        return;
+    }
+    snprintf(machine->log_last, sizeof(machine->log_last), "%s", line);
+    machine->log_repeat = 0;
+
     if (machine->log_count == OPENXISO_LOG_CAPACITY) {
         memmove(machine->log_lines[0], machine->log_lines[1],
                 sizeof(machine->log_lines[0]) * (OPENXISO_LOG_CAPACITY - 1));
@@ -344,25 +368,29 @@ static void bios_read_chs(PcMachine* machine) {
     const uint8_t head = reg8(machine, 6);           /* DH */
     const uint16_t cylinder = (uint16_t)(cylinder_low | ((cylinder_sector & 0xC0u) << 2));
     const uint16_t sector = (uint16_t)(cylinder_sector & 0x3Fu);
-    const uint64_t lba = ((uint64_t)cylinder * 16u + head) * 63u
-                         + (sector > 0 ? sector - 1u : 0u);
-    const size_t length = (size_t)count * 512u;
 
-    if (length > sizeof(machine->transfer_buffer)) {
-        set_reg8(machine, 4, 0x01u);
+    /*
+     * Геометрия берётся из плана (BPB эмулируемого диска), а не из жёстко
+     * прошитых 63/16: у дискеты 18 секторов на дорожку и 2 головки.
+     */
+    const uint16_t per_track = machine->plan.sectors_per_track != 0
+                               ? machine->plan.sectors_per_track : 63u;
+    const uint16_t heads = machine->plan.heads != 0 ? machine->plan.heads : 16u;
+    const uint64_t lba = ((uint64_t)cylinder * heads + head) * per_track
+                         + (sector > 0 ? sector - 1u : 0u);
+
+    const int length = openxiso_disk_read(machine->fd, &machine->plan, lba, count,
+                                          machine->transfer_buffer,
+                                          sizeof(machine->transfer_buffer));
+    if (length < 0) {
+        set_reg8(machine, 4, 0x04u);                /* сектор не найден */
         carry(machine, 1);
+        legacy_bios_log(machine, "INT 13h CHS: %s", openxiso_boot_last_error());
         return;
     }
-    const ssize_t read_result = pread(machine->fd, machine->transfer_buffer,
-                                      length, (off_t)(lba * 512u));
-    if (read_result < 0) {
-        set_reg8(machine, 4, 0x20u);
-        carry(machine, 1);
-        return;
-    }
-    memset(machine->transfer_buffer + read_result, 0, length - (size_t)read_result);
     transfer_to_memory(machine, machine->cpu.sregs[X86_ES],
-                       machine->cpu.regs[X86_BX], machine->transfer_buffer, length);
+                       machine->cpu.regs[X86_BX], machine->transfer_buffer,
+                       (size_t)length);
     set_reg8(machine, 0, count);
     set_reg8(machine, 4, 0x00u);
     carry(machine, 0);
@@ -384,16 +412,28 @@ static void bios_read_extended(PcMachine* machine) {
                                                  (uint16_t)(packet_offset + 14u)) << 16);
     const uint64_t lba = (uint64_t)lba_low | ((uint64_t)lba_high << 32);
 
-    const int length = openxiso_disk_read(machine->fd, machine->plan.kind, lba, count,
+    const uint32_t sector_size = openxiso_disk_sector_size(&machine->plan);
+    const int length = openxiso_disk_read(machine->fd, &machine->plan, lba, count,
                                           machine->transfer_buffer,
                                           sizeof(machine->transfer_buffer));
     if (length < 0) {
+        /* EDD: обнуляем счётчик блоков в пакете и поднимаем CF. */
+        x86_write_word(&machine->cpu,
+                       x86_physical(packet_segment, (uint16_t)(packet_offset + 2u)),
+                       0u);
         set_reg8(machine, 4, 0x20u);
         carry(machine, 1);
+        legacy_bios_log(machine, "INT 13h EDD: %s", openxiso_boot_last_error());
         return;
     }
     transfer_to_memory(machine, buffer_segment, buffer_offset,
                        machine->transfer_buffer, (size_t)length);
+    /* По спецификации EDD факт переданных блоков возвращается в пакете. */
+    const uint16_t transferred = (uint16_t)(length / (int)sector_size);
+    x86_write_word(&machine->cpu,
+                   x86_physical(packet_segment, (uint16_t)(packet_offset + 2u)),
+                   transferred);
+    set_reg8(machine, 0, (uint8_t)transferred);
     set_reg8(machine, 4, 0x00u);
     carry(machine, 0);
 }
@@ -401,24 +441,34 @@ static void bios_read_extended(PcMachine* machine) {
 static void bios_disk(PcMachine* machine) {
     const uint8_t function = reg8(machine, 4);
     switch (function) {
-        case 0x00:
+        case 0x00:                                     /* сброс контроллера */
             set_reg8(machine, 4, 0x00u);
             carry(machine, 0);
             break;
         case 0x02:
             bios_read_chs(machine);
-            legacy_bios_log(machine, "INT 13h: чтение CHS с образа");
             break;
-        case 0x08:
-            machine->cpu.regs[X86_CX] = 0xFE3Fu;     /* 1023 цилиндра, 63 сектора */
-            set_reg8(machine, 6, 15u);                 /* 16 головок */
+        case 0x08: {                                   /* геометрия привода */
+            const uint16_t per_track = machine->plan.sectors_per_track != 0
+                                       ? machine->plan.sectors_per_track : 63u;
+            const uint16_t heads = machine->plan.heads != 0 ? machine->plan.heads : 16u;
+            uint32_t cylinders = (uint32_t)(openxiso_disk_total_sectors(&machine->plan)
+                                            / ((uint64_t)per_track * heads));
+            if (cylinders > 1023u) {
+                cylinders = 1023u;
+            }
+            set_reg8(machine, 1, (uint8_t)((per_track & 0x3Fu)
+                                           | ((cylinders >> 2) & 0xC0u)));
+            set_reg8(machine, 5, (uint8_t)(cylinders & 0xFFu));
+            set_reg8(machine, 6, (uint8_t)(heads - 1u));
             set_reg8(machine, 2, 1u);                  /* один привод */
             set_reg8(machine, 4, 0x00u);
             machine->cpu.sregs[X86_ES] = 0xF000u;
             machine->cpu.regs[X86_DI] = 0x0000u;
             carry(machine, 0);
             break;
-        case 0x41:
+        }
+        case 0x41:                                     /* проверка EDD */
             machine->cpu.regs[X86_BX] = 0xAA55u;
             set_reg8(machine, 4, 0x21u);
             machine->cpu.regs[X86_CX] = 0x0001u;
@@ -426,17 +476,16 @@ static void bios_disk(PcMachine* machine) {
             break;
         case 0x42:
             bios_read_extended(machine);
-            legacy_bios_log(machine, "INT 13h: расширенное чтение LBA (El Torito)");
+            legacy_bios_log(machine, "INT 13h: чтение LBA (%s)",
+                            openxiso_emulation_name(machine->plan.emulation));
             break;
-        case 0x48: {
+        case 0x48: {                                   /* параметры EDD */
             const uint16_t segment = machine->cpu.sregs[X86_DS];
             const uint16_t offset = machine->cpu.regs[X86_SI];
             memset(machine->transfer_buffer, 0, 0x1Eu);
             machine->transfer_buffer[0] = 0x1Eu;
-            const uint32_t sector_size = openxiso_disk_sector_size(machine->plan.kind);
-            const uint64_t total = machine->image_size > 0
-                                   ? (uint64_t)(machine->image_size / (long long)sector_size)
-                                   : 0u;
+            const uint32_t sector_size = openxiso_disk_sector_size(&machine->plan);
+            const uint64_t total = openxiso_disk_total_sectors(&machine->plan);
             for (int index = 0; index < 8; ++index) {
                 machine->transfer_buffer[0x10u + index] = (uint8_t)(total >> (8 * index));
             }
@@ -523,6 +572,9 @@ static void bios_bootstrap(PcMachine* machine) {
                     machine->plan.el_torito
                         ? "El Torito: загрузчик прочитан, управление передано 0000:7C00"
                         : "MBR: загрузчик прочитан, управление передано 0000:7C00");
+    legacy_bios_log(machine, "Диск: %s, сектор %u байт, DL=%02Xh",
+                    openxiso_emulation_name(machine->plan.emulation),
+                    openxiso_disk_sector_size(&machine->plan), machine->plan.drive);
     legacy_bios_print(machine, "Загрузка образа...\r\n", 0x0Au);
     machine->status = OPENXISO_MACHINE_RUNNING;
 }

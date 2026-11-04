@@ -144,7 +144,117 @@ static void build_keyboard_program(void) {
     memcpy(boot_code, code, sizeof(code));
 }
 
+/*
+ * Третий загрузчик повторяет сценарий DimOS 14: El Torito floppy emulation,
+ * загрузчик читает корневой каталог FAT12 (LBA 19) через INT 13h AH=42h и
+ * через резервный CHS-путь AH=02h, затем ищет там имя «KERNEL  BIN».
+ */
+static void build_floppy_boot_program(void) {
+    memset(boot_code, 0, sizeof(boot_code));
+    int p = 0;
+    int dap_patch = 0;
+    int jc1 = 0, jne1 = 0, jc2 = 0, jne2 = 0;
+    int ok_patch = 0, ok_call = 0, err_patch = 0, err_call = 0;
+    int jz = 0, loop = 0;
+    int msg_ok = 0, msg_err = 0, dap = 0, print = 0, done = 0, error = 0;
+
+#define EMIT(byte) (boot_code[p++] = (uint8_t)(byte))
+#define WORD(value) do { EMIT((value) & 0xFF); EMIT(((value) >> 8) & 0xFF); } while (0)
+#define WORD_AT(position, value) do {                                        \
+        boot_code[(position)] = (uint8_t)((value) & 0xFF);                  \
+        boot_code[(position) + 1] = (uint8_t)(((value) >> 8) & 0xFF);      \
+    } while (0)
+#define DWORD(value) do {                                                    \
+        EMIT((value) & 0xFF); EMIT(((value) >> 8) & 0xFF);                  \
+        EMIT(((value) >> 16) & 0xFF); EMIT(((value) >> 24) & 0xFF);         \
+    } while (0)
+
+    EMIT(0xBE); dap_patch = p; WORD(0);        /* mov si, dap          */
+    EMIT(0xB4); EMIT(0x42);                    /* mov ah, 42h         */
+    EMIT(0xB2); EMIT(0x00);                    /* mov dl, 00h         */
+    EMIT(0xCD); EMIT(0x13);                    /* int 13h             */
+    EMIT(0x72); jc1 = p; EMIT(0);              /* jc error            */
+    EMIT(0xBE); WORD(0x8000);                  /* mov si, 8000h       */
+    EMIT(0xAD);                                /* lodsw               */
+    EMIT(0x3D); WORD(0x454B);                  /* cmp ax, 'KE'        */
+    EMIT(0x75); jne1 = p; EMIT(0);             /* jne error           */
+
+    EMIT(0xBB); WORD(0x9000);                  /* mov bx, 9000h       */
+    EMIT(0xB9); WORD(0x0002);                  /* mov cx, 0002h (C0/S2)*/
+    EMIT(0xBA); WORD(0x0100);                  /* mov dx, 0100h (H1/D0)*/
+    EMIT(0xB8); WORD(0x0201);                  /* mov ax, 0201h       */
+    EMIT(0xCD); EMIT(0x13);                    /* int 13h             */
+    EMIT(0x72); jc2 = p; EMIT(0);              /* jc error            */
+    EMIT(0xBE); WORD(0x9000);                  /* mov si, 9000h       */
+    EMIT(0xAD);                                /* lodsw               */
+    EMIT(0x3D); WORD(0x454B);                  /* cmp ax, 'KE'        */
+    EMIT(0x75); jne2 = p; EMIT(0);             /* jne error           */
+
+    EMIT(0xBE); ok_patch = p; WORD(0);         /* mov si, msg_ok      */
+    EMIT(0xE8); ok_call = p; WORD(0);          /* call print          */
+    EMIT(0xF4);                                /* hlt                 */
+    error = p;
+    EMIT(0xBE); err_patch = p; WORD(0);        /* mov si, msg_err     */
+    EMIT(0xE8); err_call = p; WORD(0);         /* call print          */
+    EMIT(0xF4);                                /* hlt                 */
+
+    print = p;
+    EMIT(0xAC);                                /* lodsb               */
+    EMIT(0x84); EMIT(0xC0);                    /* test al, al         */
+    EMIT(0x74); jz = p; EMIT(0);               /* jz done             */
+    EMIT(0xB4); EMIT(0x0E);                    /* mov ah, 0Eh         */
+    EMIT(0xCD); EMIT(0x10);                    /* int 10h             */
+    EMIT(0xEB); loop = p; EMIT(0);             /* jmp print           */
+    done = p;
+    EMIT(0xC3);                                /* ret                 */
+
+    msg_ok = p;
+    for (const char* c = "Floppy El Torito OK\r\n"; *c; ++c) {
+        EMIT(*c);
+    }
+    EMIT(0);
+    msg_err = p;
+    for (const char* c = "Disk read error\r\n"; *c; ++c) {
+        EMIT(*c);
+    }
+    EMIT(0);
+
+    while (p & 1) {
+        EMIT(0);
+    }
+    dap = p;
+    EMIT(0x10); EMIT(0x00);                    /* размер DAP          */
+    WORD(1);                                   /* один сектор         */
+    WORD(0x8000); WORD(0x0000);                /* 0000:8000           */
+    DWORD(19); DWORD(0);                       /* LBA = 19            */
+
+    WORD_AT(dap_patch, 0x7C00 + dap);
+    boot_code[jc1] = (uint8_t)(error - (jc1 + 1));
+    boot_code[jne1] = (uint8_t)(error - (jne1 + 1));
+    boot_code[jc2] = (uint8_t)(error - (jc2 + 1));
+    boot_code[jne2] = (uint8_t)(error - (jne2 + 1));
+    WORD_AT(ok_patch, 0x7C00 + msg_ok);
+    WORD_AT(ok_call, print - (ok_call + 2));
+    WORD_AT(err_patch, 0x7C00 + msg_err);
+    WORD_AT(err_call, print - (err_call + 2));
+    boot_code[jz] = (uint8_t)(done - (jz + 1));
+    boot_code[loop] = (uint8_t)(print - (loop + 1));
+
+    boot_code[510] = 0x55;
+    boot_code[511] = 0xAA;
+
+#undef EMIT
+#undef WORD
+#undef WORD_AT
+#undef DWORD
+}
+
 /* ---------------- Синтетические образы ---------------- */
+
+static void put_le16(uint8_t* destination, uint16_t value) {
+    destination[0] = (uint8_t)(value & 0xFFu);
+    destination[1] = (uint8_t)((value >> 8) & 0xFFu);
+}
 
 static void put_le32(uint8_t* destination, uint32_t value) {
     destination[0] = (uint8_t)(value & 0xFFu);
@@ -186,6 +296,60 @@ static int write_iso(const char* path) {
     entry[12] = 4;                                  /* 4 x 512 = 2048 байт */
 
     memcpy(image + 19u * 2048u, boot_code, sizeof(boot_code));
+
+    FILE* file = fopen(path, "wb");
+    if (file == NULL) {
+        free(image);
+        return 0;
+    }
+    const size_t written = fwrite(image, 1u, size, file);
+    fclose(file);
+    free(image);
+    return written == size;
+}
+
+/*
+ * ISO в стиле `xorriso -b dimos.img -c boot.cat` (без -no-emul-boot):
+ * каталог объявляет ЭМУЛЯЦИЮ ДИСКЕТЫ 1,44 МБ, поэтому INT 13h обязан
+ * читать не весь ISO, а образ по смещению 19*2048 секторами по 512 байт.
+ */
+static int write_floppy_el_torito_iso(const char* path) {
+    const size_t sectors = 26u;
+    const size_t size = sectors * 2048u;
+    uint8_t* image = (uint8_t*)calloc(size, 1u);
+    if (image == NULL) {
+        return 0;
+    }
+
+    uint8_t* pvd = image + 16u * 2048u;
+    pvd[0] = 1;
+    memcpy(pvd + 1, "CD001", 5);
+    pvd[6] = 1;
+    memcpy(pvd + 40, "DIMOS EMULATED FLOPPY", 21);
+    put_le32(pvd + 80, (uint32_t)sectors);
+
+    uint8_t* boot_record = image + 17u * 2048u;
+    boot_record[0] = 0;
+    memcpy(boot_record + 1, "CD001", 5);
+    boot_record[6] = 1;
+    memcpy(boot_record + 7, "EL TORITO SPECIFICATION", 23);
+    put_le32(boot_record + 0x47, 18u);
+
+    uint8_t* catalog = image + 18u * 2048u;
+    catalog[0] = 0x01;
+    catalog[30] = 0x55;
+    catalog[31] = 0xAA;
+    uint8_t* entry = catalog + 32;
+    entry[0] = 0x88;                                /* загружаемая запись */
+    entry[1] = 0x02;                                /* эмуляция дискеты 1,44 МБ */
+    put_le16(entry + 2, 0u);                        /* сегмент загрузки */
+    put_le16(entry + 6, 1u);                        /* один 512-байтный сектор */
+    put_le32(entry + 8, 19u);                       /* LBA образа */
+
+    uint8_t* boot_image = image + 19u * 2048u;
+    memcpy(boot_image, boot_code, sizeof(boot_code));
+    /* «Корневой каталог» FAT12: LBA 19 внутри эмулируемого диска. */
+    memcpy(boot_image + 19u * 512u, "KERNEL  BIN", 11);
 
     FILE* file = fopen(path, "wb");
     if (file == NULL) {
@@ -359,6 +523,44 @@ int main(void) {
             close(image_fd);
         }
         remove(key_path);
+    }
+
+    /* --- El Torito floppy emulation: сценарий DimOS 14 --- */
+    build_floppy_boot_program();
+    const char* floppy_path = "/tmp/openxiso_floppy_eltorito.iso";
+    if (!write_floppy_el_torito_iso(floppy_path)) {
+        CHECK(0, "не удалось собрать ISO с эмуляцией дискеты");
+    } else {
+        int image_fd = -1;
+        PcMachine* machine = boot_machine(floppy_path, &image_fd);
+        CHECK(machine != NULL, "машина создана для floppy emulation");
+        if (machine != NULL) {
+            collect_screen(machine, screen, sizeof(screen));
+            CHECK(machine->plan.el_torito == 1,
+                  "каталог El Torito распознан");
+            CHECK(machine->plan.emulation == 2u,
+                  "объявлена эмуляция дискеты 1,44 МБ");
+            CHECK(machine->plan.sector_size == 512u,
+                  "INT 13h работает секторами по 512 байт, не 2048");
+            CHECK(machine->plan.drive == 0x00u,
+                  "загрузчику передан DL=00h (дискета)");
+            CHECK(machine->plan.sectors_per_track == 18u
+                  && machine->plan.heads == 2u,
+                  "геометрия CHS дискеты 18 секторов / 2 головки");
+            CHECK(openxiso_machine_status(machine) == OPENXISO_MACHINE_HALTED,
+                  "загрузчик завершился после чтения диска");
+            CHECK(strstr(screen, "Floppy El Torito OK") != NULL,
+                  "EDD AH=42h и CHS AH=02h нашли KERNEL.BIN по LBA 19");
+            CHECK(strstr(openxiso_machine_error(machine), "за пределами") == NULL,
+                  "чтение INT 13h не вышло за границы эмулируемого диска");
+            CHECK(strstr(openxiso_machine_log(machine), "эмуляция дискеты") != NULL,
+                  "журнал сообщает режим эмуляции на русском языке");
+            openxiso_machine_destroy(machine);
+        }
+        if (image_fd >= 0) {
+            close(image_fd);
+        }
+        remove(floppy_path);
     }
 
     printf("Проверок: %d, ошибок: %d\n", checks, failures);

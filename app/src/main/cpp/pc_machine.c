@@ -154,6 +154,10 @@ int openxiso_machine_load_image(PcMachine* machine, int fd, long long size) {
     if (machine == NULL) {
         return -1;
     }
+    /* Новая загрузка начинает новый журнал POST. */
+    machine->log_count = 0;
+    machine->log_repeat = 0;
+    machine->log_last[0] = '\0';
     machine->fd = fd;
     machine->image_size = size;
     if (openxiso_boot_plan(fd, size, &machine->plan,
@@ -164,8 +168,14 @@ int openxiso_machine_load_image(PcMachine* machine, int fd, long long size) {
     }
     if (machine->plan.el_torito) {
         legacy_bios_log(machine,
-                        "Образ ISO 9660 / El Torito: LBA %u, секторов %u",
-                        machine->plan.boot_lba, machine->plan.boot_sectors);
+                        "ISO 9660 / El Torito: LBA %u, режим «%s»",
+                        machine->plan.boot_lba,
+                        openxiso_emulation_name(machine->plan.emulation));
+        legacy_bios_log(machine,
+                        "Эмулируемый диск: %llu байт, сектор %u, геометрия %u/%u",
+                        (unsigned long long)machine->plan.image_bytes,
+                        openxiso_disk_sector_size(&machine->plan),
+                        machine->plan.sectors_per_track, machine->plan.heads);
     } else {
         legacy_bios_log(machine, "Образ диска с MBR: загрузочный сектор LBA 0");
     }
@@ -227,10 +237,17 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
     }
 
     if (machine->cpu.fault) {
-        snprintf(machine->error, sizeof(machine->error),
-                 "Неподдерживаемая инструкция %02Xh по адресу %04X:%04X",
-                 machine->cpu.fault_opcode,
-                 machine->cpu.sregs[X86_CS], machine->cpu.ip);
+        const uint8_t opcode = machine->cpu.fault_opcode;
+        if (opcode == 0x66u || opcode == 0x67u || opcode == 0x0Fu) {
+            snprintf(machine->error, sizeof(machine->error),
+                     "Гостю нужен 32-битный защищённый режим (386+): "
+                     "код %02Xh по адресу %04X:%04X",
+                     opcode, machine->cpu.sregs[X86_CS], machine->cpu.ip);
+        } else {
+            snprintf(machine->error, sizeof(machine->error),
+                     "Неподдерживаемая инструкция %02Xh по адресу %04X:%04X",
+                     opcode, machine->cpu.sregs[X86_CS], machine->cpu.ip);
+        }
         legacy_bios_log(machine, "Ошибка ЦПУ: %s", machine->error);
         machine->status = OPENXISO_MACHINE_ERROR;
         return 0;

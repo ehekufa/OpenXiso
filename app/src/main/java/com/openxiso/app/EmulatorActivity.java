@@ -82,6 +82,12 @@ public final class EmulatorActivity extends Activity {
                 + " · " + NativeBridge.emulatorFirmware());
 
         sendButton.setOnClickListener(view -> sendTypedCharacters());
+        /* Кнопка «Готово» экранной клавиатуры отправляет текст и перевод строки. */
+        keyInput.setOnEditorActionListener((view, actionId, event) -> {
+            sendTypedCharacters();
+            pushCharacter('\n');
+            return true;
+        });
         pauseButton.setOnClickListener(view -> togglePause());
         stopButton.setOnClickListener(view -> stopEmulation());
 
@@ -273,30 +279,57 @@ public final class EmulatorActivity extends Activity {
 
     /* ---------------- Клавиатура INT 16h ---------------- */
 
-    /** Младший байт — ASCII в AL, старший — PC-скан-код в AH. */
+    /*
+     * Младший байт — код символа в AL, старший — PC-скан-код в AH.
+     * VGA гостя хранит CP866, поэтому кириллица с экранной клавиатуры
+     * переводится в тот же однобайтовый код, который BIOS возвращает в AL.
+     */
+    private static int toCp866(char character) {
+        if (character >= 0x0410 && character <= 0x042F) {   /* А..Я */
+            return 0x80 + (character - 0x0410);
+        }
+        if (character >= 0x0430 && character <= 0x043F) {   /* а..п */
+            return 0xA0 + (character - 0x0430);
+        }
+        if (character >= 0x0440 && character <= 0x044F) {   /* р..я */
+            return 0xE0 + (character - 0x0440);
+        }
+        if (character == 0x0401) {                          /* Ё */
+            return 0xF0;
+        }
+        if (character == 0x0451) {                          /* ё */
+            return 0xF1;
+        }
+        if (character >= 0x20 && character < 0x7F) {
+            return character;
+        }
+        return -1;
+    }
+
     private void pushCharacter(char character) {
         if (machine == 0L) {
             return;
         }
-        int ascii;
+        int code;
         int scan;
         if (character == '\n' || character == '\r') {
-            ascii = 0x0D;
+            code = 0x0D;
             scan = 0x1C;
         } else if (character == '\b' || character == 0x7F) {
-            ascii = 0x08;
+            code = 0x08;
             scan = 0x0E;
         } else if (character == '\t') {
-            ascii = 0x09;
+            code = 0x09;
             scan = 0x0F;
-        } else if (character >= 0x20 && character < 0x7F) {
-            ascii = character;
-            scan = 0;
         } else {
-            return; // BIOS INT 16h принимает однобайтовую кодировку загрузчика
+            code = toCp866(character);
+            scan = 0;
+        }
+        if (code < 0) {
+            return;
         }
         synchronized (nativeLock) {
-            NativeBridge.emulatorPushKey(machine, (scan << 8) | ascii);
+            NativeBridge.emulatorPushKey(machine, (scan << 8) | code);
         }
     }
 
@@ -313,7 +346,7 @@ public final class EmulatorActivity extends Activity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (machine != 0L && event != null) {
             final int character = event.getUnicodeChar();
-            if (character > 0 && character < 0x80) {
+            if (character > 0 && character <= 0xFFFF) {
                 pushCharacter((char) character);
                 return true;
             }
