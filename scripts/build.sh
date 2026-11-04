@@ -32,10 +32,19 @@ if ! command -v java > /dev/null 2>&1; then
 fi
 
 # При необходимости ставим те же компоненты, что и workflow.
-SDKMANAGER="$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager"
-if [[ "${INSTALL_SDK_COMPONENTS:-1}" == "1" && -x "$SDKMANAGER" ]]; then
+# Путь к sdkmanager различается у разных версий cmdline-tools — ищем все варианты.
+SDKMANAGER=""
+for candidate in \
+    "$ANDROID_SDK/cmdline-tools/latest/bin/sdkmanager" \
+    "$ANDROID_SDK/cmdline-tools/16.0/bin/sdkmanager" \
+    "$ANDROID_SDK/cmdline-tools/tools/bin/sdkmanager" \
+    "$ANDROID_SDK/tools/bin/sdkmanager"; do
+    if [[ -x "$candidate" ]]; then SDKMANAGER="$candidate"; break; fi
+done
+if [[ "${INSTALL_SDK_COMPONENTS:-1}" == "1" && -n "$SDKMANAGER" ]]; then
     echo "Проверка компонентов Android SDK..."
-    "$SDKMANAGER" --install \
+    yes | "$SDKMANAGER" --sdk_root="$ANDROID_SDK" --licenses > /dev/null 2>&1 || true
+    "$SDKMANAGER" --sdk_root="$ANDROID_SDK" --install \
         "platforms;android-35" \
         "build-tools;34.0.0" \
         "build-tools;35.0.0" \
