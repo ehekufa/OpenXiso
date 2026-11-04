@@ -12,6 +12,7 @@
 /app/release/
 /app/debug/
 /build/
+/dist/
 *.apk
 *.aab
 *.keystore

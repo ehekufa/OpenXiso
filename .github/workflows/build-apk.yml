@@ -112,10 +112,37 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || inputs.variant != 'debug' }}
         run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      - name: Список собранных APK
+      - name: Проверка состава APK
         run: |
+          set -euo pipefail
           echo "Собранные файлы:"
           ls -lh app/build/outputs/apk/*/*.apk
+
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          if [[ ! -f "$APK" ]]; then
+            echo "Отладочный APK не найден" >&2
+            exit 1
+          fi
+          echo "Ключевые записи внутри APK:"
+          unzip -l "$APK" | grep -E 'classes.dex|lib/.*/libopenxiso.so|AndroidManifest.xml|resources.arsc' || true
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            if ! unzip -l "$APK" | grep -q "lib/$abi/libopenxiso.so"; then
+              echo "Отсутствует libopenxiso.so для $abi" >&2
+              exit 1
+            fi
+            echo "Нативная библиотека для $abi: присутствует"
+          done
+          {
+            echo "### APK собран и проверен"
+            echo ""
+            echo "| Файл | Размер |"
+            echo "| --- | --- |"
+            for file in app/build/outputs/apk/*/*.apk; do
+              echo "| $(basename "$file") | $(du -h "$file" | cut -f1) |"
+            done
+            echo ""
+            echo "Нативные библиотеки: arm64-v8a, armeabi-v7a, x86_64."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Публикация отладочного APK в артефакты
         uses: actions/upload-artifact@v4
