@@ -16,6 +16,8 @@ extern "C" {
 #endif
 
 #define OPENXISO_MEMORY_SIZE (1024u * 1024u)
+/* Для 32/64-битных гостей выделяем 64 МБ плоской памяти. */
+#define OPENXISO_WIDE_MEMORY_SIZE (64u * 1024u * 1024u)
 #define OPENXISO_VGA_ADDRESS 0xB8000u
 #define OPENXISO_BIOS_ROM_ADDRESS 0xF0000u
 #define OPENXISO_BOOT_ADDRESS 0x7C00u
@@ -36,6 +38,8 @@ typedef enum PcMachineStatus {
 typedef struct PcMachine {
     X86Cpu cpu;
     uint8_t* memory;
+    size_t memory_size;
+    X86Mode cpu_mode;          /* выбранная пользователем разрядность гостя */
 
     int fd;                    /* не закрывается здесь: владелец — Java/SAF */
     long long image_size;
@@ -65,6 +69,10 @@ typedef struct PcMachine {
 
 PcMachine* openxiso_machine_create(void);
 void openxiso_machine_destroy(PcMachine* machine);
+
+/** Выбор разрядности гостя: 16 / 32 / 64 бита (X86Mode). */
+int openxiso_machine_set_cpu_mode(PcMachine* machine, int mode);
+X86Mode openxiso_machine_cpu_mode(const PcMachine* machine);
 
 /** Принимает fd образа, открытый ContentResolver, и строит план загрузки. */
 int openxiso_machine_load_image(PcMachine* machine, int fd, long long size);

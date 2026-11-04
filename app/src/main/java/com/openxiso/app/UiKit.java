@@ -91,7 +91,7 @@ final class UiKit {
 
     /** Плитка созданной конфигурации: нажатие запускает настоящий эмулятор. */
     static FrameLayout createConfigurationTile(Context context, String osName,
-                                               String fileName,
+                                               String fileName, String modeLabel,
                                                View.OnClickListener listener) {
         final FrameLayout tile = new FrameLayout(context);
         tile.setLayoutParams(tileParams(context));
@@ -132,7 +132,7 @@ final class UiKit {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
 
         final TextView subtitle = new TextView(context);
-        subtitle.setText(fileName);
+        subtitle.setText(context.getString(R.string.tile_cpu_mode, fileName, modeLabel));
         subtitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f);
         subtitle.setTextColor(color(context, R.color.text_secondary));
         subtitle.setMaxLines(1);

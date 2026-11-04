@@ -56,6 +56,11 @@ extern "C" {
 #define OPENXISO_URI_CAPACITY 1024
 #define OPENXISO_INFO_CAPACITY 256
 
+/* Разрядность гостя: 0 = 16 бит, 1 = 32 бита, 2 = 64 бита. */
+#define OPENXISO_CPU_MODE_16 0
+#define OPENXISO_CPU_MODE_32 1
+#define OPENXISO_CPU_MODE_64 2
+
 /* ---------------- Коды возврата ---------------- */
 
 typedef enum OpenXisoStatus {
@@ -104,6 +109,10 @@ void openxiso_draft_reset(OpenXisoEngine* engine);
 void openxiso_draft_set_os_name(OpenXisoEngine* engine, const char* utf8_name);
 const char* openxiso_draft_os_name(const OpenXisoEngine* engine);
 
+/** Выбор разрядности гостя для черновика конфигурации. */
+void openxiso_draft_set_cpu_mode(OpenXisoEngine* engine, int mode);
+int openxiso_draft_cpu_mode(const OpenXisoEngine* engine);
+
 /** Проверяет расширение .iso / .img и запоминает Uri и имя файла. */
 OpenXisoStatus openxiso_draft_select_image(OpenXisoEngine* engine,
                                            const char* uri,
@@ -129,6 +138,7 @@ int openxiso_configuration_count(const OpenXisoEngine* engine);
 const char* openxiso_configuration_os_name(const OpenXisoEngine* engine, int index);
 const char* openxiso_configuration_image_name(const OpenXisoEngine* engine, int index);
 const char* openxiso_configuration_image_uri(const OpenXisoEngine* engine, int index);
+int openxiso_configuration_cpu_mode(const OpenXisoEngine* engine, int index);
 
 /* ---------------- Диагностика ---------------- */
 

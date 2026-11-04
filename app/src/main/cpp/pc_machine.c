@@ -125,7 +125,8 @@ PcMachine* openxiso_machine_create(void) {
     if (machine == NULL) {
         return NULL;
     }
-    machine->memory = (uint8_t*)calloc(OPENXISO_MEMORY_SIZE, 1u);
+    machine->memory_size = OPENXISO_MEMORY_SIZE;
+    machine->memory = (uint8_t*)calloc(machine->memory_size, 1u);
     if (machine->memory == NULL) {
         free(machine);
         return NULL;
@@ -133,7 +134,8 @@ PcMachine* openxiso_machine_create(void) {
     machine->fd = -1;
     machine->status = OPENXISO_MACHINE_IDLE;
     machine->cpu.memory = machine->memory;
-    machine->cpu.memory_size = OPENXISO_MEMORY_SIZE;
+    machine->cpu.memory_size = machine->memory_size;
+    machine->cpu.max_mode = X86_MODE_16;
     machine->cpu.context = machine;
     machine->cpu.port_in = machine_port_in;
     machine->cpu.port_out = machine_port_out;
@@ -148,6 +150,38 @@ void openxiso_machine_destroy(PcMachine* machine) {
     /* fd не закрываем: он принадлежит ParcelFileDescriptor в Java. */
     free(machine->memory);
     free(machine);
+}
+
+int openxiso_machine_set_cpu_mode(PcMachine* machine, int mode) {
+    if (machine == NULL) {
+        return -1;
+    }
+    const X86Mode selected = mode == 2 ? X86_MODE_64
+                             : mode == 1 ? X86_MODE_32 : X86_MODE_16;
+    const size_t wanted = selected == X86_MODE_16
+                          ? (size_t)OPENXISO_MEMORY_SIZE
+                          : (size_t)OPENXISO_WIDE_MEMORY_SIZE;
+    if (wanted != machine->memory_size) {
+        uint8_t* replacement = (uint8_t*)calloc(wanted, 1u);
+        if (replacement == NULL) {
+            snprintf(machine->error, sizeof(machine->error),
+                     "Не удалось выделить %zu МБ памяти для гостя",
+                     wanted / (1024u * 1024u));
+            return -1;
+        }
+        free(machine->memory);
+        machine->memory = replacement;
+        machine->memory_size = wanted;
+        machine->cpu.memory = replacement;
+        machine->cpu.memory_size = wanted;
+    }
+    machine->cpu_mode = selected;
+    x86_set_max_mode(&machine->cpu, selected);
+    return 0;
+}
+
+X86Mode openxiso_machine_cpu_mode(const PcMachine* machine) {
+    return machine == NULL ? X86_MODE_16 : machine->cpu_mode;
 }
 
 int openxiso_machine_load_image(PcMachine* machine, int fd, long long size) {
@@ -186,8 +220,9 @@ int openxiso_machine_start(PcMachine* machine) {
     if (machine == NULL || machine->fd < 0) {
         return -1;
     }
-    memset(machine->memory, 0, OPENXISO_MEMORY_SIZE);
-    x86_reset(&machine->cpu, machine->memory, OPENXISO_MEMORY_SIZE);
+    memset(machine->memory, 0, machine->memory_size);
+    x86_reset(&machine->cpu, machine->memory, machine->memory_size);
+    x86_set_max_mode(&machine->cpu, machine->cpu_mode);
     machine->cpu.context = machine;
     machine->cpu.port_in = machine_port_in;
     machine->cpu.port_out = machine_port_out;
@@ -210,7 +245,9 @@ int openxiso_machine_start(PcMachine* machine) {
 
     legacy_bios_install(machine);
     machine->status = OPENXISO_MACHINE_RUNNING;
-    legacy_bios_log(machine, "Машина запущена: CPU 8086, вектор сброса F000:FFF0");
+    legacy_bios_log(machine, "Машина запущена: профиль %s (%s), сброс F000:FFF0",
+                    x86_mode_name(machine->cpu_mode),
+                    x86_mode_description(machine->cpu_mode));
     return 0;
 }
 
@@ -238,7 +275,13 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
 
     if (machine->cpu.fault) {
         const uint8_t opcode = machine->cpu.fault_opcode;
-        if (opcode == 0x66u || opcode == 0x67u || opcode == 0x0Fu) {
+        const uint64_t address = x86_wide_ip(&machine->cpu);
+        if (machine->cpu.fault_reason != NULL) {
+            snprintf(machine->error, sizeof(machine->error),
+                     "%s: код %02Xh по адресу %llXh",
+                     machine->cpu.fault_reason, opcode,
+                     (unsigned long long)address);
+        } else if (opcode == 0x66u || opcode == 0x67u || opcode == 0x0Fu) {
             snprintf(machine->error, sizeof(machine->error),
                      "Гостю нужен 32-битный защищённый режим (386+): "
                      "код %02Xh по адресу %04X:%04X",

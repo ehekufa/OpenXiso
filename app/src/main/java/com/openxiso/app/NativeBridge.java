@@ -16,6 +16,11 @@ public final class NativeBridge {
     /** Код успешного выполнения (OPENXISO_OK из openxiso_core.h). */
     public static final int STATUS_OK = 0;
 
+    /* Разрядность гостя: выбирается в диалоге конфигурации. */
+    public static final int CPU_MODE_16 = 0;
+    public static final int CPU_MODE_32 = 1;
+    public static final int CPU_MODE_64 = 2;
+
     /* Состояния виртуального PC (PcMachineStatus из pc_machine.h). */
     public static final int EMULATOR_IDLE = 0;
     public static final int EMULATOR_RUNNING = 1;
@@ -100,6 +105,10 @@ public final class NativeBridge {
 
     static native void resetDraft(long handle);
 
+    static native void setCpuMode(long handle, int mode);
+
+    static native int getConfigurationCpuMode(long handle, int index);
+
     static native String statusMessage(int status);
 
     /*
@@ -112,6 +121,8 @@ public final class NativeBridge {
     static native void emulatorDestroy(long machine);
 
     static native int emulatorLoadImage(long machine, int fd, long size);
+
+    static native int emulatorSetCpuMode(long machine, int mode);
 
     static native int emulatorStart(long machine);
 

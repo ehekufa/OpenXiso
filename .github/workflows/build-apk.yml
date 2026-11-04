@@ -43,13 +43,13 @@ jobs:
   # Ядро на C проверяется отдельно и вообще не требует Android SDK.
   # ------------------------------------------------------------------
   native-tests:
-    name: Тесты C-ядра и загрузки BIOS (хостовый gcc)
+    name: Тесты C-ядра и загрузки BIOS 16/32/64 бита (хостовый gcc)
     runs-on: ubuntu-24.04
     steps:
       - name: Получение исходников
         uses: actions/checkout@v5
 
-      - name: Компиляция и запуск тестов ядра и реальной загрузки El Torito/MBR
+      - name: Компиляция и запуск тестов ядра, El Torito/MBR и режимов i386/x86-64
         run: make -C app/src/main/cpp/tests run
 
       - name: Проверка под санитайзерами адреса и неопределённого поведения
@@ -59,11 +59,23 @@ jobs:
             -Iapp/src/main/cpp/include \
             app/src/main/cpp/openxiso_core.c \
             app/src/main/cpp/x86_cpu.c \
+            app/src/main/cpp/x86_wide.c \
             app/src/main/cpp/boot_image.c \
             app/src/main/cpp/legacy_bios.c \
             app/src/main/cpp/pc_machine.c \
             app/src/main/cpp/tests/test_emulator.c -o /tmp/openxiso_emulator_san
           /tmp/openxiso_emulator_san
+          gcc -std=c11 -Wall -Wextra -Wpedantic -Werror -O1 -g \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Iapp/src/main/cpp/include \
+            app/src/main/cpp/openxiso_core.c \
+            app/src/main/cpp/x86_cpu.c \
+            app/src/main/cpp/x86_wide.c \
+            app/src/main/cpp/boot_image.c \
+            app/src/main/cpp/legacy_bios.c \
+            app/src/main/cpp/pc_machine.c \
+            app/src/main/cpp/tests/test_wide.c -o /tmp/openxiso_wide_san
+          /tmp/openxiso_wide_san
 
   # ------------------------------------------------------------------
   # Основная сборка: Java + NDK/CMake -> APK.

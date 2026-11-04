@@ -1,10 +1,13 @@
 /*
- * x86_cpu.c — интерпретатор реального режима 8086/186 (собственная реализация).
+ * x86_cpu.c — 16-битная часть интерпретатора: реальный режим 8086/186.
  *
  * Поддерживаются: все основные арифметико-логические операции, ModRM-адресация,
  * префиксы сегментов/REP/LOCK, стек, переходы, вызовы, строковые операции,
  * сдвиги, порты ввода-вывода и прерывания. Память — плоский 1 МБ с отключённой
  * линией A20, как у настоящего PC в реальном режиме.
+ *
+ * 32/64-битные инструкции (префиксы 0x66/0x67, 0Fh, REX, protected/long mode)
+ * исполняет x86_wide.c; этот файл лишь передаёт ему управление.
  * Комментарии и диагностика — на русском языке.
  */
 
@@ -348,10 +351,13 @@ void x86_raise_interrupt(X86Cpu* cpu, uint8_t vector) {
 }
 
 void x86_reset(X86Cpu* cpu, uint8_t* memory, size_t memory_size) {
+    /* Выбранную пользователем разрядность сохраняем через сброс. */
+    const X86Mode max_mode = cpu->max_mode;
     memset(cpu, 0, sizeof(*cpu));
     cpu->memory = memory;
     cpu->memory_size = memory_size;
     cpu->flags = 0x0002u;
+    cpu->max_mode = max_mode;
 }
 
 /* ---------------- Порты ---------------- */
@@ -476,10 +482,17 @@ int x86_step(X86Cpu* cpu) {
     if (cpu->halted || cpu->waiting || cpu->fault) {
         return 0;
     }
+    if (cpu->mode != X86_MODE_16) {
+        return x86_wide_step(cpu);
+    }
+
+    /* 16-битное ядро правит regs[]; подтягиваем их в широкий файл регистров. */
+    x86_wide_sync_from_real(cpu);
 
     const uint16_t start_ip = cpu->ip;
     int repetition = 0;
     int segment_override = -1;
+    int wide_prefix = 0;
     uint8_t opcode = 0;
 
     for (;;) {
@@ -492,9 +505,19 @@ int x86_step(X86Cpu* cpu) {
             case 0x2E: segment_override = X86_CS; continue;
             case 0x36: segment_override = X86_SS; continue;
             case 0x3E: segment_override = X86_DS; continue;
+            case 0x66: case 0x67: wide_prefix = 1; continue;      /* 32 бита */
             default: break;
         }
         break;
+    }
+
+    /*
+     * Префиксы 0x66/0x67 и любые 0Fh-инструкции отдаём широкому декодеру:
+     * именно с них начинается переход загрузчика в защищённый режим.
+     */
+    if (wide_prefix || opcode == 0x0F) {
+        cpu->ip = start_ip;
+        return x86_wide_step(cpu);
     }
 
     cpu->instructions += 1u;

@@ -120,6 +120,63 @@
         android:textSize="12sp"
         android:visibility="gone" />
 
+    <!-- Выбор разрядности гостя: меняет реальный набор инструкций CPU. -->
+    <TextView
+        android:id="@+id/cpuModeLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/label_cpu_mode"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp" />
+
+    <RadioGroup
+        android:id="@+id/cpuModeGroup"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <RadioButton
+            android:id="@+id/cpuMode16"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:buttonTint="@color/blue"
+            android:checked="true"
+            android:text="@string/cpu_mode_16"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+
+        <RadioButton
+            android:id="@+id/cpuMode32"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:buttonTint="@color/blue"
+            android:text="@string/cpu_mode_32"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+
+        <RadioButton
+            android:id="@+id/cpuMode64"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:buttonTint="@color/blue"
+            android:text="@string/cpu_mode_64"
+            android:textColor="@color/text_primary"
+            android:textSize="13sp" />
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/cpuModeHint"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/cpu_mode_hint"
+        android:textColor="@color/text_secondary"
+        android:textSize="11sp" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

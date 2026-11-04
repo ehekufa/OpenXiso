@@ -559,6 +559,16 @@ static void bios_bootstrap(PcMachine* machine) {
     machine->cpu.regs[X86_SI] = OPENXISO_BOOT_ADDRESS;
     machine->cpu.regs[X86_BP] = 0x0000u;
 
+    /* Повторный INT 19h — это перезагрузка: сбрасываем и широкое ядро. */
+    machine->cpu.mode = X86_MODE_16;
+    machine->cpu.cr0 = 0u;
+    machine->cpu.efer = 0u;
+    machine->cpu.rip = OPENXISO_BOOT_ADDRESS;
+    machine->cpu.seg_base[X86_CS] = 0u;
+    machine->cpu.seg_base[X86_DS] = 0u;
+    machine->cpu.seg_base[X86_ES] = 0u;
+    machine->cpu.seg_base[X86_SS] = 0u;
+
     /*
      * Firmware-хук INT 19h обработал вызов без кадра iret, поэтому управление
      * передаём напрямую: настоящий BIOS после загрузки MBR делает то же самое —
@@ -573,7 +583,9 @@ static void bios_bootstrap(PcMachine* machine) {
                         ? "El Torito: загрузчик прочитан, управление передано 0000:7C00"
                         : "MBR: загрузчик прочитан, управление передано 0000:7C00");
     legacy_bios_log(machine, "Диск: %s, сектор %u байт, DL=%02Xh",
-                    openxiso_emulation_name(machine->plan.emulation),
+                    machine->plan.el_torito
+                        ? openxiso_emulation_name(machine->plan.emulation)
+                        : "сырой образ MBR",
                     openxiso_disk_sector_size(&machine->plan), machine->plan.drive);
     legacy_bios_print(machine, "Загрузка образа...\r\n", 0x0Au);
     machine->status = OPENXISO_MACHINE_RUNNING;

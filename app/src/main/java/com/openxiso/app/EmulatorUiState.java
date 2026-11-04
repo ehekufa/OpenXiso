@@ -22,6 +22,7 @@ final class EmulatorUiState {
     private static final String KEY_IMAGE_NAME = "openxiso.imageName";
     private static final String KEY_IMAGE_INFO = "openxiso.imageInfo";
     private static final String KEY_ERROR = "openxiso.error";
+    private static final String KEY_CPU_MODE = "openxiso.cpuMode";
 
     boolean bootComplete;
     int bootStepIndex;
@@ -31,6 +32,7 @@ final class EmulatorUiState {
     String imageName;
     String imageInfo;
     String errorMessage;
+    int cpuMode = NativeBridge.CPU_MODE_16;
 
     Bundle save() {
         final Bundle bundle = new Bundle();
@@ -42,6 +44,7 @@ final class EmulatorUiState {
         bundle.putString(KEY_IMAGE_NAME, imageName);
         bundle.putString(KEY_IMAGE_INFO, imageInfo);
         bundle.putString(KEY_ERROR, errorMessage);
+        bundle.putInt(KEY_CPU_MODE, cpuMode);
         return bundle;
     }
 
@@ -56,6 +59,7 @@ final class EmulatorUiState {
             state.imageName = saved.getString(KEY_IMAGE_NAME, null);
             state.imageInfo = saved.getString(KEY_IMAGE_INFO, null);
             state.errorMessage = saved.getString(KEY_ERROR, null);
+            state.cpuMode = saved.getInt(KEY_CPU_MODE, NativeBridge.CPU_MODE_16);
         }
         state.applyToNative(engine);
         return state;
@@ -64,6 +68,7 @@ final class EmulatorUiState {
     /** Синхронизирует сохранённые поля с движком после пересоздания Activity. */
     void applyToNative(long engine) {
         NativeBridge.setOsName(engine, osNameDraft);
+        NativeBridge.setCpuMode(engine, cpuMode);
         if (imageUri != null && imageName != null) {
             NativeBridge.selectImage(engine, imageUri, imageName);
         }
@@ -80,6 +85,7 @@ final class EmulatorUiState {
         imageName = null;
         imageInfo = null;
         errorMessage = null;
+        cpuMode = NativeBridge.CPU_MODE_16;
         dialogVisible = false;
     }
 }

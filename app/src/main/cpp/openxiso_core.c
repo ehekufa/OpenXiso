@@ -30,6 +30,7 @@ typedef struct OpenXisoConfiguration {
     char image_uri[OPENXISO_URI_CAPACITY];
     char image_name[OPENXISO_NAME_CAPACITY];
     char image_info[OPENXISO_INFO_CAPACITY];
+    int cpu_mode;
 } OpenXisoConfiguration;
 
 struct OpenXisoEngine {
@@ -43,6 +44,7 @@ struct OpenXisoEngine {
     char image_uri[OPENXISO_URI_CAPACITY];
     char image_name[OPENXISO_NAME_CAPACITY];
     char image_info[OPENXISO_INFO_CAPACITY];
+    int draft_cpu_mode;
 
     /* Список конфигураций и диагностика. */
     OpenXisoConfiguration* items;
@@ -235,6 +237,20 @@ void openxiso_draft_reset(OpenXisoEngine* engine) {
     engine->image_uri[0] = '\0';
     engine->image_name[0] = '\0';
     engine->image_info[0] = '\0';
+    engine->draft_cpu_mode = OPENXISO_CPU_MODE_16;
+}
+
+void openxiso_draft_set_cpu_mode(OpenXisoEngine* engine, int mode) {
+    if (engine == NULL) {
+        return;
+    }
+    engine->draft_cpu_mode = mode == OPENXISO_CPU_MODE_64 ? OPENXISO_CPU_MODE_64
+                             : mode == OPENXISO_CPU_MODE_32 ? OPENXISO_CPU_MODE_32
+                             : OPENXISO_CPU_MODE_16;
+}
+
+int openxiso_draft_cpu_mode(const OpenXisoEngine* engine) {
+    return engine == NULL ? OPENXISO_CPU_MODE_16 : engine->draft_cpu_mode;
 }
 
 void openxiso_draft_set_os_name(OpenXisoEngine* engine, const char* utf8_name) {
@@ -368,6 +384,7 @@ long long openxiso_create_configuration(OpenXisoEngine* engine) {
     copy_text(item->image_uri, sizeof(item->image_uri), engine->image_uri);
     copy_text(item->image_name, sizeof(item->image_name), engine->image_name);
     copy_text(item->image_info, sizeof(item->image_info), engine->image_info);
+    item->cpu_mode = engine->draft_cpu_mode;
 
     const long long created_id = item->id;
     openxiso_draft_reset(engine);
@@ -402,6 +419,11 @@ const char* openxiso_configuration_image_name(const OpenXisoEngine* engine, int 
 const char* openxiso_configuration_image_uri(const OpenXisoEngine* engine, int index) {
     const OpenXisoConfiguration* item = configuration_at(engine, index);
     return item == NULL ? "" : item->image_uri;
+}
+
+int openxiso_configuration_cpu_mode(const OpenXisoEngine* engine, int index) {
+    const OpenXisoConfiguration* item = configuration_at(engine, index);
+    return item == NULL ? OPENXISO_CPU_MODE_16 : item->cpu_mode;
 }
 
 /* ---------------- Диагностика ---------------- */

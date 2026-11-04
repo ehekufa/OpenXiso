@@ -222,6 +222,20 @@ Java_com_openxiso_app_NativeBridge_resetDraft(JNIEnv*, jclass, jlong handle) {
     openxiso_draft_reset(engineFromHandle(handle));
 }
 
+JNIEXPORT void JNICALL
+Java_com_openxiso_app_NativeBridge_setCpuMode(JNIEnv*, jclass, jlong handle,
+                                              jint mode) {
+    openxiso_draft_set_cpu_mode(engineFromHandle(handle), static_cast<int>(mode));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_openxiso_app_NativeBridge_getConfigurationCpuMode(JNIEnv*, jclass,
+                                                            jlong handle,
+                                                            jint index) {
+    return static_cast<jint>(openxiso_configuration_cpu_mode(
+        engineFromHandle(handle), static_cast<int>(index)));
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_openxiso_app_NativeBridge_statusMessage(JNIEnv* env, jclass, jint status) {
     return toJavaString(env,

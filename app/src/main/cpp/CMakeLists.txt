@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_library(openxiso SHARED
         openxiso_core.c
         x86_cpu.c
+        x86_wide.c
         boot_image.c
         legacy_bios.c
         pc_machine.c

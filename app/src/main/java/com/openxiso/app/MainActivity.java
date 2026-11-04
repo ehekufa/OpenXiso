@@ -77,6 +77,7 @@ import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.GridLayout;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import java.io.IOException;
@@ -110,6 +111,7 @@ public final class MainActivity extends Activity {
     private TextView imageInfo;
     private TextView fileError;
     private Button createButton;
+    private RadioGroup cpuModeGroup;
     private int currentFieldColor;
     private ValueAnimator fieldAnimator;
 
@@ -259,14 +261,27 @@ public final class MainActivity extends Activity {
         for (int index = 0; index < count; index++) {
             final String osName = NativeBridge.getConfigurationOsName(engine, index);
             final String imageUri = NativeBridge.getConfigurationImageUri(engine, index);
+            final int cpuMode = NativeBridge.getConfigurationCpuMode(engine, index);
             workspaceGrid.addView(UiKit.createConfigurationTile(this, osName,
                     NativeBridge.getConfigurationFileName(engine, index),
+                    cpuModeLabel(cpuMode),
                     view -> startActivity(EmulatorActivity.launchIntent(
-                            MainActivity.this, osName, imageUri))));
+                            MainActivity.this, osName, imageUri, cpuMode))));
         }
         workspaceGrid.addView(UiKit.createPlusTile(
                 this, view -> showConfigurationDialog()));
         configurationCounter.setText(getString(R.string.workspace_counter, count));
+    }
+
+    /** Русская подпись выбранной разрядности для плитки и консоли. */
+    static String cpuModeLabel(int mode) {
+        if (mode == NativeBridge.CPU_MODE_64) {
+            return "64 бита";
+        }
+        if (mode == NativeBridge.CPU_MODE_32) {
+            return "32 бита";
+        }
+        return "16 бит";
     }
 
     /* ---------------- Экран 3. Модальное окно конфигурации ---------------- */
@@ -314,7 +329,22 @@ public final class MainActivity extends Activity {
         imageInfo = root.findViewById(R.id.imageInfo);
         fileError = root.findViewById(R.id.fileError);
         createButton = root.findViewById(R.id.createButton);
+        cpuModeGroup = root.findViewById(R.id.cpuModeGroup);
         final View cancelButton = root.findViewById(R.id.cancelButton);
+
+        /* Выбор разрядности сразу уходит в C-ядро и сохраняется в UI-состоянии. */
+        cpuModeGroup.setOnCheckedChangeListener((group, checkedId) -> {
+            final int mode;
+            if (checkedId == R.id.cpuMode64) {
+                mode = NativeBridge.CPU_MODE_64;
+            } else if (checkedId == R.id.cpuMode32) {
+                mode = NativeBridge.CPU_MODE_32;
+            } else {
+                mode = NativeBridge.CPU_MODE_16;
+            }
+            state.cpuMode = mode;
+            NativeBridge.setCpuMode(engine, mode);
+        });
 
         /* Плоское outlined-поле: анимация обводки в Google Blue при фокусе. */
         fieldOutline = UiKit.roundedRect(this, Color.TRANSPARENT,
@@ -410,6 +440,14 @@ public final class MainActivity extends Activity {
         if (osNameInput == null) {
             return;
         }
+        final int radioId = state.cpuMode == NativeBridge.CPU_MODE_64
+                ? R.id.cpuMode64
+                : state.cpuMode == NativeBridge.CPU_MODE_32
+                        ? R.id.cpuMode32 : R.id.cpuMode16;
+        if (cpuModeGroup != null && cpuModeGroup.getCheckedRadioButtonId() != radioId) {
+            cpuModeGroup.check(radioId);
+        }
+
         final String draft = state.osNameDraft == null ? "" : state.osNameDraft;
         if (!draft.contentEquals(osNameInput.getText())) {
             osNameInput.setText(draft);

@@ -26,6 +26,15 @@
     <string name="action_create">Создать</string>
     <string name="error_form_incomplete">Заполните название системы и выберите файл образа</string>
 
+    <!-- Выбор разрядности гостя -->
+    <string name="label_cpu_mode">Разрядность системы</string>
+    <string name="cpu_mode_hint">Процессор виртуальной машины: 8086 / i386 / x86-64</string>
+    <string name="cpu_mode_16">16 бит</string>
+    <string name="cpu_mode_32">32 бита</string>
+    <string name="cpu_mode_64">64 бита</string>
+    <string name="emulator_profile">Профиль CPU: %1$s</string>
+    <string name="tile_cpu_mode">%1$s · %2$s</string>
+
     <!-- Экран настоящего эмулятора: VGA-консоль собственного Legacy BIOS -->
     <string name="emulator_title">Консоль Legacy BIOS</string>
     <string name="emulator_subtitle">Реальный режим x86 · 1 МБ ОЗУ · VGA 80×25</string>

@@ -19,3 +19,4 @@
 *.so
 app/src/main/cpp/tests/test_core
 app/src/main/cpp/tests/test_emulator
+app/src/main/cpp/tests/test_wide

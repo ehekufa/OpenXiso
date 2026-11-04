@@ -62,6 +62,14 @@ Java_com_openxiso_app_NativeBridge_emulatorLoadImage(JNIEnv*, jclass, jlong hand
                                        static_cast<long long>(size));
 }
 
+/** Разрядность гостя: 16 / 32 / 64 бита. Вызывается до emulatorStart. */
+JNIEXPORT jint JNICALL
+Java_com_openxiso_app_NativeBridge_emulatorSetCpuMode(JNIEnv*, jclass,
+                                                       jlong handle, jint mode) {
+    return openxiso_machine_set_cpu_mode(machineFromHandle(handle),
+                                         static_cast<int>(mode));
+}
+
 JNIEXPORT jint JNICALL
 Java_com_openxiso_app_NativeBridge_emulatorStart(JNIEnv*, jclass, jlong handle) {
     return openxiso_machine_start(machineFromHandle(handle));

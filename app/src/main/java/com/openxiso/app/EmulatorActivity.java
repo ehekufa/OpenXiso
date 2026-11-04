@@ -40,6 +40,7 @@ public final class EmulatorActivity extends Activity {
     /** Имена extra совпадают с теми, что кладёт MainActivity при запуске плитки. */
     public static final String EXTRA_IMAGE_URI = "openxiso.imageUri";
     public static final String EXTRA_OS_NAME = "openxiso.osName";
+    public static final String EXTRA_CPU_MODE = "openxiso.cpuMode";
 
     private static final int SLICE_INSTRUCTIONS = 20000;
     private static final int FRAME_DELAY_MS = 16;
@@ -48,6 +49,7 @@ public final class EmulatorActivity extends Activity {
     private final Object nativeLock = new Object();
 
     private long machine;
+    private int cpuMode = NativeBridge.CPU_MODE_16;
     private ParcelFileDescriptor descriptor;
     private File cachedImage;
     private Thread cpuThread;
@@ -76,10 +78,13 @@ public final class EmulatorActivity extends Activity {
         final Button stopButton = findViewById(R.id.emulatorStopButton);
 
         final String osName = getIntent().getStringExtra(EXTRA_OS_NAME);
+        cpuMode = getIntent().getIntExtra(EXTRA_CPU_MODE, NativeBridge.CPU_MODE_16);
         title.setText(getString(R.string.emulator_title)
                 + (osName == null || osName.isEmpty() ? "" : " · " + osName));
         firmware.setText(getString(R.string.emulator_subtitle)
-                + " · " + NativeBridge.emulatorFirmware());
+                + " · " + NativeBridge.emulatorFirmware()
+                + " · " + getString(R.string.emulator_profile,
+                        MainActivity.cpuModeLabel(cpuMode)));
 
         sendButton.setOnClickListener(view -> sendTypedCharacters());
         /* Кнопка «Готово» экранной клавиатуры отправляет текст и перевод строки. */
@@ -115,6 +120,10 @@ public final class EmulatorActivity extends Activity {
         machine = NativeBridge.emulatorCreate();
         if (machine == 0L) {
             showFatalError(getString(R.string.emulator_error_engine));
+            return false;
+        }
+        if (NativeBridge.emulatorSetCpuMode(machine, cpuMode) != 0) {
+            showFatalError(safeText(NativeBridge.emulatorError(machine)));
             return false;
         }
 
@@ -417,10 +426,12 @@ public final class EmulatorActivity extends Activity {
     }
 
     /** Вспомогательный метод для MainActivity: удобная сборка Intent запуска. */
-    static Intent launchIntent(android.content.Context context, String osName, String imageUri) {
+    static Intent launchIntent(android.content.Context context, String osName,
+                               String imageUri, int cpuMode) {
         final Intent intent = new Intent(context, EmulatorActivity.class);
         intent.putExtra(EXTRA_OS_NAME, osName);
         intent.putExtra(EXTRA_IMAGE_URI, imageUri);
+        intent.putExtra(EXTRA_CPU_MODE, cpuMode);
         return intent;
     }
 }
