@@ -171,16 +171,16 @@ NDK `27.0.12077973`, CMake `3.22.1`, затем `assembleDebug` и `assembleRele
 Скачать из CLI на своей машине: `gh run download <run-id> -n openxiso-debug-apk`.
 Отдельный job `native-tests` перед сборкой гоняет тесты C-ядра на обычном gcc.
 
-**Проверенный зелёный запуск с эмулятором:** [41792556528](https://github.com/ehekufa/OpenXiso/actions/runs/41792556528)
+**Проверенный зелёный запуск с эмуляцией El Torito:** [41795897135](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135)
 — собраны `app-debug.apk` (1,2 МБ) и `app-release-unsigned.apk` (1,1 МБ).
-Job `native-tests` выполнил 27 проверок ядра, 18 проверок реальной загрузки BIOS
-и отдельный прогон под ASan/UBSan. Шаг «Проверка состава APK» подтвердил
-`classes.dex` (6044 Б), `AndroidManifest.xml` (2576 Б), `resources.arsc` (8564 Б)
-и `lib/<abi>/libopenxiso.so` для всех трёх ABI: `arm64-v8a` 448272 Б,
-`armeabi-v7a` 268772 Б, `x86_64` 431784 Б — рост относительно прежней сборки
-как раз и есть скомпилированный интерпретатор x86 и Legacy BIOS. Прямые ссылки
-на артефакты: [debug](https://github.com/ehekufa/OpenXiso/actions/runs/41792556528/artifacts/13303684144),
-[release](https://github.com/ehekufa/OpenXiso/actions/runs/41792556528/artifacts/13303589395).
+Job `native-tests` выполнил 27 проверок ядра, 28 проверок реальной загрузки BIOS
+(включая эмуляцию дискеты и поиск `KERNEL.BIN`) и отдельный прогон под
+ASan/UBSan. Шаг «Проверка состава APK» подтвердил `classes.dex` (6044 Б),
+`AndroidManifest.xml` (2576 Б), `resources.arsc` (8608 Б) и
+`lib/<abi>/libopenxiso.so` для всех трёх ABI: `arm64-v8a` 451568 Б,
+`armeabi-v7a` 271020 Б, `x86_64` 435384 Б. Прямые ссылки на артефакты:
+[debug](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135/artifacts/13304888913),
+[release](https://github.com/ehekufa/OpenXiso/actions/runs/41795897135/artifacts/13304933788).
 
 > Из песочницы агента артефакт скачать нельзя: хост blob-хранилища GitHub закрыт
 > сетевыми ограничениями, а токен не имеет права `actions: write` для ручного
