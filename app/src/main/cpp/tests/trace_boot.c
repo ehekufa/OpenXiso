@@ -57,7 +57,12 @@ int main(int argc, char **argv) {
         if (disk) { Trace after = capture(m); printf("BIOS after:  "); print_trace(&after); }
         if (t.cr0 != m->cpu.cr0) {
             printf("CR0 change: "); print_trace(&t);
-            printf("CR0 after:  %08x\n", m->cpu.cr0);
+            printf("CR0 after: %08x GDTR=%" PRIx64 ":%04x IDTR=%" PRIx64 ":%04x\n",
+                   m->cpu.cr0, m->cpu.gdtr_base, m->cpu.gdtr_limit,
+                   m->cpu.idtr_base, m->cpu.idtr_limit);
+            for (int d = 0; d < 6; d++)
+                printf("GDT[%02x]=%016" PRIx64 "\n", d * 8,
+                       x86_read_physical(&m->cpu, m->cpu.gdtr_base + d * 8, 64));
         }
         if (!reported && m->cpu.instructions > 5000 && m->cpu.sregs[X86_CS] == 0 &&
             m->cpu.ip >= 0x7c00 && m->cpu.ip < 0x8200 &&
