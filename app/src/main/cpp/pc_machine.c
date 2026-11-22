@@ -59,63 +59,26 @@ static int append_utf8(char* out, size_t capacity, size_t* position, uint32_t po
 
 static int machine_interrupt_hook(void* context, uint8_t vector) {
     PcMachine* machine = (PcMachine*)context;
+    /* The guest may replace any IVT entry; do not intercept its handler. */
+    uint32_t entry = (uint32_t)vector * 4u;
+    if (x86_read_word(&machine->cpu, entry) != (uint16_t)(0x1000u + vector * 16u) ||
+        x86_read_word(&machine->cpu, entry + 2u) != 0xF000u) return 0;
     legacy_bios_interrupt(machine, vector);
     return 1;
 }
 
 static uint8_t machine_port_in(void* context, uint16_t port) {
     PcMachine* machine = (PcMachine*)context;
-    switch (port) {
-        case 0x0060u:
-            if (machine->key_head != machine->key_tail) {
-                const uint16_t key = machine->keys[machine->key_head];
-                machine->key_head = (machine->key_head + 1) % 64;
-                return (uint8_t)(key & 0xFFu);
-            }
-            return 0x00u;
-        case 0x0064u:
-            return machine->key_head != machine->key_tail ? 0x01u : 0x00u;
-        case 0x03FDu:
-            return 0x20u;                                  /* UART готов к передаче */
-        case OPENXISO_FIRMWARE_PORT:
-            return 0x10u;                                  /* версия прошивки */
-        case OPENXISO_FIRMWARE_POST_PORT:
-            return 0x01u;
-        default:
-            return 0xFFu;
-    }
+    return devices_port_in(machine, port);
 }
+static uint64_t machine_mmio_read(void* ctx, uint64_t addr, int width){ return devices_mmio_read((PcMachine*)ctx, addr, width); }
+static void machine_mmio_write(void* ctx, uint64_t addr, int width, uint64_t v){ devices_mmio_write((PcMachine*)ctx, addr, width, v); }
+static int machine_mmio_check(void* ctx, uint64_t addr){ return devices_mmio_check((PcMachine*)ctx, addr); }
+static int machine_irq_check(void* ctx){ return devices_irq_check((PcMachine*)ctx); }
 
 static void machine_port_out(void* context, uint16_t port, uint8_t value) {
     PcMachine* machine = (PcMachine*)context;
-    switch (port) {
-        case OPENXISO_FIRMWARE_PORT:
-            legacy_bios_interrupt(machine, value);
-            break;
-        case OPENXISO_FIRMWARE_POST_PORT:
-            legacy_bios_post(machine);
-            break;
-        case 0x03F8u:                                      /* COM1: отладочный вывод */
-            if (value == '\n' || value == '\r') {
-                if (machine->serial_length > 0) {
-                    machine->serial_line[machine->serial_length] = '\0';
-                    legacy_bios_log(machine, "COM1: %s", machine->serial_line);
-                    machine->serial_length = 0;
-                }
-            } else if (machine->serial_length + 1 < (int)sizeof(machine->serial_line)) {
-                machine->serial_line[machine->serial_length++] = (char)value;
-            }
-            break;
-        case 0x0CF9u:                                      /* сброс/выключение */
-            if ((value & 0x06u) != 0) {
-                machine->cpu.halted = 1;
-                machine->status = OPENXISO_MACHINE_HALTED;
-                legacy_bios_log(machine, "Получен сигнал выключения питания");
-            }
-            break;
-        default:
-            break;
-    }
+    devices_port_out(machine, port, value);
 }
 
 /* ---------------- Жизненный цикл машины ---------------- */
@@ -139,7 +102,12 @@ PcMachine* openxiso_machine_create(void) {
     machine->cpu.context = machine;
     machine->cpu.port_in = machine_port_in;
     machine->cpu.port_out = machine_port_out;
+    machine->cpu.mmio_read = machine_mmio_read;
+    machine->cpu.mmio_write = machine_mmio_write;
+    machine->cpu.mmio_check = machine_mmio_check;
+    machine->cpu.irq_check = machine_irq_check;
     machine->cpu.interrupt_hook = machine_interrupt_hook;
+    devices_init(machine);
     return machine;
 }
 
@@ -147,7 +115,7 @@ void openxiso_machine_destroy(PcMachine* machine) {
     if (machine == NULL) {
         return;
     }
-    /* fd не закрываем: он принадлежит ParcelFileDescriptor в Java. */
+    free(machine->framebuffer);
     free(machine->memory);
     free(machine);
 }
@@ -226,8 +194,13 @@ int openxiso_machine_start(PcMachine* machine) {
     machine->cpu.context = machine;
     machine->cpu.port_in = machine_port_in;
     machine->cpu.port_out = machine_port_out;
+    machine->cpu.mmio_read = machine_mmio_read;
+    machine->cpu.mmio_write = machine_mmio_write;
+    machine->cpu.mmio_check = machine_mmio_check;
+    machine->cpu.irq_check = machine_irq_check;
     machine->cpu.interrupt_hook = machine_interrupt_hook;
     machine->cpu.flags = 0x0002u;
+    devices_reset(machine);
 
     machine->cpu.sregs[X86_CS] = 0xF000u;
     machine->cpu.ip = 0xFFF0u;
@@ -260,17 +233,34 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
         return 0;
     }
     if (machine->cpu.halted) {
-        machine->status = OPENXISO_MACHINE_HALTED;
-        return 0;
+        /* HLT with IF set is an interruptible idle state, not power-off.
+         * Advance emulated devices even while no instructions execute. */
+        if (!(machine->cpu.flags & X86_IF) || machine->status == OPENXISO_MACHINE_HALTED) {
+            machine->status = OPENXISO_MACHINE_HALTED;
+            return 0;
+        }
+        devices_tick(machine, max_instructions);
+        if (!x86_check_and_deliver_irq(&machine->cpu)) {
+            machine->status = OPENXISO_MACHINE_WAITING;
+            return 0;
+        }
+        machine->status = OPENXISO_MACHINE_RUNNING;
     }
 
     for (uint32_t index = 0; index < max_instructions; ++index) {
         if (!x86_step(&machine->cpu)) {
             break;
         }
+        devices_tick(machine, 1);
         if ((machine->cpu.instructions & 0x3FFFu) == 0u) {
             machine->ticks += 1u;
         }
+    }
+    if (machine->cpu.triple_fault) {
+        snprintf(machine->error, sizeof(machine->error), "Тройная ошибка (triple fault): нет обработчика исключения");
+        legacy_bios_log(machine, "Ошибка ЦПУ: %s", machine->error);
+        machine->status = OPENXISO_MACHINE_ERROR;
+        return 0;
     }
 
     if (machine->cpu.fault) {
@@ -300,8 +290,12 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
         return 0;
     }
     if (machine->cpu.halted) {
-        machine->status = OPENXISO_MACHINE_HALTED;
-        legacy_bios_log(machine, "Загрузчик выполнил HLT, машина остановлена");
+        if (machine->cpu.flags & X86_IF) {
+            machine->status = OPENXISO_MACHINE_WAITING;
+        } else {
+            machine->status = OPENXISO_MACHINE_HALTED;
+            legacy_bios_log(machine, "Загрузчик выполнил HLT при запрещённых прерываниях");
+        }
         return 0;
     }
     return 1;
@@ -371,6 +365,9 @@ void openxiso_machine_push_key(PcMachine* machine, uint16_t scan_and_ascii) {
         machine->keys[machine->key_tail] = scan_and_ascii;
         machine->key_tail = next;
     }
+    machine->kbd_output = (uint8_t)(scan_and_ascii >> 8);
+    machine->kbd_output_full = 1;
+    devices_raise_irq(machine, 1);
     if (machine->cpu.waiting) {
         machine->cpu.waiting = 0;
         machine->status = OPENXISO_MACHINE_RUNNING;

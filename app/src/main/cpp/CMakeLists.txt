@@ -18,6 +18,7 @@ add_library(openxiso SHARED
         boot_image.c
         legacy_bios.c
         pc_machine.c
+        devices.c
         openxiso_jni.cpp
         emulator_jni.cpp)
 

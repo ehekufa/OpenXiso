@@ -20,3 +20,8 @@
 app/src/main/cpp/tests/test_core
 app/src/main/cpp/tests/test_emulator
 app/src/main/cpp/tests/test_wide
+
+# Linux test images are downloaded locally, not redistributed.
+/test-images/
+app/src/main/cpp/tests/linux_probe
+app/src/main/cpp/tests/test_devices

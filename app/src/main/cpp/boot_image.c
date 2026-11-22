@@ -231,6 +231,16 @@ int openxiso_boot_plan(int fd, long long size, OpenXisoBootPlan* plan,
     plan->image_offset = 0u;
     plan->image_bytes = (uint64_t)size;
     plan->sector_size = 512u;
+    /* Standard floppy sizes have well-known CHS geometry even without a BPB. */
+    if (size == 1200LL * 1024 || size == 1440LL * 1024 || size == 2880LL * 1024) {
+        plan->drive = 0;
+        plan->heads = 2;
+        plan->sectors_per_track = size == 1200LL * 1024 ? 15 :
+                                  size == 1440LL * 1024 ? 18 : 36;
+        plan->emulation = size == 1200LL * 1024 ? OPENXISO_EMULATION_FLOPPY_1200 :
+                          size == 1440LL * 1024 ? OPENXISO_EMULATION_FLOPPY_1440 :
+                                                OPENXISO_EMULATION_FLOPPY_2880;
+    }
     apply_bpb(fd, 0u, plan);
     return 0;
 }

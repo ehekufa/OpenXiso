@@ -92,6 +92,15 @@ static void emit_real_prefix(int* position, int long_mode) {
         emit32(position, 0x00000100u);          /* MOV EAX, LME      */
         emit(position, 0x66); emit(position, 0x31); emit(position, 0xD2);
         emit(position, 0x0F); emit(position, 0x30);   /* WRMSR       */
+        /* Таблицы страниц для PG: PML4[0x1000]=0x2003, PDPT[0x2000]=0x83 (1GB identity) */
+        /* MOV word [0x1000], 0x2003 */
+        emit(position, 0xC7); emit(position, 0x06); emit16(position, 0x1000); emit16(position, 0x2003);
+        emit(position, 0xC7); emit(position, 0x06); emit16(position, 0x1002); emit16(position, 0x0000);
+        emit(position, 0xC7); emit(position, 0x06); emit16(position, 0x2000); emit16(position, 0x0083);
+        emit(position, 0xC7); emit(position, 0x06); emit16(position, 0x2002); emit16(position, 0x0000);
+        /* MOV EAX, 0x1000; MOV CR3, EAX */
+        emit(position, 0x66); emit(position, 0xB8); emit32(position, 0x00001000u);
+        emit(position, 0x0F); emit(position, 0x22); emit(position, 0xD8);
     }
 
     emit(position, 0x0F); emit(position, 0x20); emit(position, 0xC0);

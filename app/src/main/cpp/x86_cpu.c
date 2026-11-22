@@ -23,7 +23,7 @@ static void set_flag(X86Cpu* cpu, uint16_t mask, int value) {
     if (value) {
         cpu->flags |= mask;
     } else {
-        cpu->flags &= (uint16_t)~mask;
+        cpu->flags &= ~(uint32_t)mask;
     }
 }
 
@@ -45,16 +45,419 @@ static int parity(uint8_t value) {
 /* ---------------- Память ---------------- */
 
 uint32_t x86_physical(uint16_t segment, uint16_t offset) {
-    return (((uint32_t)segment << 4) + offset) & ADDRESS_MASK;
+    return ((uint32_t)segment << 4) + offset;
+}
+
+uint32_t x86_physical_a20(const X86Cpu* cpu, uint16_t segment, uint16_t offset) {
+    uint32_t addr = ((uint32_t)segment << 4) + offset;
+    if (cpu && !cpu->a20_enabled) {
+        addr &= ~0x100000u;
+    }
+    return addr;
+}
+
+static uint32_t apply_a20(const X86Cpu* cpu, uint32_t physical) {
+    if (cpu && !cpu->a20_enabled && cpu->mode == X86_MODE_16) {
+        physical &= ~0x100000u;
+    }
+    return physical;
 }
 
 uint8_t x86_read_byte(const X86Cpu* cpu, uint32_t physical) {
-    return cpu->memory[physical & ADDRESS_MASK];
+    physical = apply_a20(cpu, physical);
+    if (cpu->mmio_check && cpu->mmio_check(cpu->context, physical)) {
+        return (uint8_t)cpu->mmio_read(cpu->context, physical, 8);
+    }
+    if (physical >= cpu->memory_size) {
+        if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+            physical &= (uint32_t)(cpu->memory_size - 1);
+        } else {
+            return 0;
+        }
+    }
+    return cpu->memory[physical];
 }
 
 void x86_write_byte(X86Cpu* cpu, uint32_t physical, uint8_t value) {
-    cpu->memory[physical & ADDRESS_MASK] = value;
+    physical = apply_a20(cpu, physical);
+    if (cpu->mmio_check && cpu->mmio_check(cpu->context, physical)) {
+        cpu->mmio_write(cpu->context, physical, 8, value);
+        return;
+    }
+    if (physical >= cpu->memory_size) {
+        if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+            physical &= (uint32_t)(cpu->memory_size - 1);
+        } else {
+            return;
+        }
+    }
+    cpu->memory[physical] = value;
 }
+
+uint64_t x86_read_physical(X86Cpu* cpu, uint64_t addr, int width) {
+    uint64_t value = 0;
+    for (int i = 0; i < width / 8; i++) {
+        uint64_t a = addr + (uint64_t)i;
+        uint8_t b;
+        if (cpu->mmio_check && cpu->mmio_check(cpu->context, a)) {
+            b = (uint8_t)cpu->mmio_read(cpu->context, a, 8);
+        } else if (a >= cpu->memory_size) {
+            if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+                b = cpu->memory[(size_t)(a & (cpu->memory_size - 1))];
+            } else {
+                b = 0;
+            }
+        } else {
+            b = cpu->memory[(size_t)a];
+        }
+        value |= (uint64_t)b << (8 * i);
+    }
+    return value;
+}
+
+void x86_write_physical(X86Cpu* cpu, uint64_t addr, int width, uint64_t value) {
+    for (int i = 0; i < width / 8; i++) {
+        uint64_t a = addr + (uint64_t)i;
+        uint8_t b = (uint8_t)(value >> (8 * i));
+        if (cpu->mmio_check && cpu->mmio_check(cpu->context, a)) {
+            cpu->mmio_write(cpu->context, a, 8, b);
+        } else if (a >= cpu->memory_size) {
+            if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+                cpu->memory[(size_t)(a & (cpu->memory_size - 1))] = b;
+            }
+        } else {
+            cpu->memory[(size_t)a] = b;
+        }
+    }
+}
+
+/* ---------- Страничная память ---------- */
+static uint64_t phys_read_raw(X86Cpu* cpu, uint64_t addr, int width) {
+    uint64_t v = 0;
+    for (int i = 0; i < width / 8; i++) {
+        uint64_t a = addr + (uint64_t)i;
+        uint8_t b = 0;
+        if (cpu->mmio_check && cpu->mmio_check(cpu->context, a)) {
+            b = (uint8_t)cpu->mmio_read(cpu->context, a, 8);
+        } else if (a < cpu->memory_size) {
+            b = cpu->memory[(size_t)a];
+        } else if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+            b = cpu->memory[(size_t)(a & (cpu->memory_size - 1))];
+        }
+        v |= (uint64_t)b << (8 * i);
+    }
+    return v;
+}
+static void phys_write_raw(X86Cpu* cpu, uint64_t addr, int width, uint64_t value) {
+    for (int i = 0; i < width / 8; i++) {
+        uint64_t a = addr + (uint64_t)i;
+        uint8_t b = (uint8_t)(value >> (8 * i));
+        if (cpu->mmio_check && cpu->mmio_check(cpu->context, a)) {
+            cpu->mmio_write(cpu->context, a, 8, b);
+        } else if (a < cpu->memory_size) {
+            cpu->memory[(size_t)a] = b;
+        } else if (cpu->memory_size && (cpu->memory_size & (cpu->memory_size - 1)) == 0) {
+            cpu->memory[(size_t)(a & (cpu->memory_size - 1))] = b;
+        }
+    }
+}
+
+/* pf_error is -1 on success; 0 is a valid non-present supervisor read fault. */
+uint64_t x86_translate(X86Cpu* cpu, uint64_t linear, int is_write, int is_fetch, int* pf_error) {
+    *pf_error = -1;
+    if (!(cpu->cr0 & X86_CR0_PG)) return linear;
+
+    const int user = cpu->cpl == 3;
+    const int pae = !!(cpu->cr4 & X86_CR4_PAE);
+    const int long_mode = !!(cpu->efer & X86_EFER_LMA);
+    const int entry_bits = (pae || long_mode) ? 64 : 32;
+    const uint64_t address_mask = entry_bits == 64 ? 0x000ffffffffff000ULL : 0xfffff000ULL;
+    int shifts[4];
+    int levels;
+    uint64_t table;
+    if (long_mode) {
+        shifts[0]=39; shifts[1]=30; shifts[2]=21; shifts[3]=12; levels=4;
+        table = cpu->cr3 & ~0xfffull;
+    } else if (pae) {
+        shifts[0]=30; shifts[1]=21; shifts[2]=12; levels=3;
+        table = cpu->cr3 & ~0x1full;
+    } else {
+        shifts[0]=22; shifts[1]=12; levels=2;
+        table = cpu->cr3 & ~0xfffu;
+    }
+    int writable = 1, accessible = 1, no_execute = 0;
+    int fault_bits = (is_write ? 2 : 0) | (user ? 4 : 0) | (is_fetch ? 16 : 0);
+    for (int level = 0; level < levels; ++level) {
+        int shift = shifts[level];
+        uint64_t index_mask = (!long_mode && pae && level == 0) ? 3 :
+                              (entry_bits == 32 ? 1023 : 511);
+        uint64_t entry_addr = table + ((linear >> shift) & index_mask) * (entry_bits / 8);
+        uint64_t entry = phys_read_raw(cpu, entry_addr, entry_bits);
+        if (!(entry & 1)) { *pf_error = fault_bits; cpu->cr2 = linear; return linear; }
+        /* PAE PDPTEs do not carry U/S or R/W permission bits. */
+        if (long_mode || !pae || level != 0) {
+            writable &= !!(entry & 2);
+            accessible &= !!(entry & 4);
+        }
+        if (entry_bits == 64 && (entry & (1ULL << 63))) {
+            if (!(cpu->efer & X86_EFER_NXE)) {
+                *pf_error = fault_bits | 9; cpu->cr2 = linear; return linear;
+            }
+            no_execute = 1;
+        }
+        int leaf = level == levels - 1;
+        int huge = !leaf && (entry & 0x80) &&
+                   ((long_mode && (shift == 30 || shift == 21)) ||
+                    (pae && !long_mode && shift == 21) ||
+                    (!pae && !long_mode && shift == 22 && (cpu->cr4 & X86_CR4_PSE)));
+        if ((entry & 0x80) && !leaf && !huge) {
+            *pf_error = fault_bits | 9; cpu->cr2 = linear; return linear;
+        }
+        if ((user && !accessible) || (is_write && !writable && (user || (cpu->cr0 & X86_CR0_WP))) ||
+            (is_fetch && no_execute)) {
+            *pf_error = fault_bits | 1; cpu->cr2 = linear; return linear;
+        }
+        uint64_t updated = entry | 0x20;
+        if (is_write && (leaf || huge)) updated |= 0x40;
+        if (updated != entry && !(pae && !long_mode && level == 0))
+            phys_write_raw(cpu, entry_addr, entry_bits, updated);
+        if (leaf || huge) {
+            uint64_t page_mask = (1ULL << shift) - 1;
+            return (entry & address_mask & ~page_mask) | (linear & page_mask);
+        }
+        table = entry & address_mask;
+    }
+    return linear;
+}
+
+/* ---------- Сегменты ---------- */
+int x86_load_segment(X86Cpu* cpu, int seg_index, uint16_t selector) {
+    if (!(cpu->cr0 & X86_CR0_PE)) {
+        cpu->seg_sel[seg_index] = selector;
+        cpu->sregs[seg_index] = selector;
+        cpu->seg_base[seg_index] = (uint64_t)selector * 16u;
+        cpu->seg_limit[seg_index] = 0xFFFFu;
+        return 0;
+    }
+    if (selector == 0) {
+        cpu->seg_sel[seg_index] = 0;
+        cpu->seg_base[seg_index] = 0;
+        cpu->seg_limit[seg_index] = 0;
+        if (seg_index != X86_CS && seg_index != X86_SS) {
+            cpu->sregs[seg_index] = 0;
+        }
+        return 0;
+    }
+    uint16_t index = selector >> 3;
+    int ti = (selector >> 2) & 1;
+    uint64_t base;
+    uint32_t limit_raw;
+    uint8_t access, flags;
+    if (ti) {
+        if (cpu->tr_base == 0) return -1;
+        base = cpu->tr_base;
+        limit_raw = (uint16_t)cpu->tr_limit;
+        /* LDT: read descriptor from LDT base - simplified: use GDT base + tr? */
+        /* For simplicity, treat LDT as in memory at tr_base */
+        uint64_t entry = base + (uint64_t)index * 8u;
+        uint8_t d[8];
+        for (int i = 0; i < 8; i++) d[i] = (uint8_t)phys_read_raw(cpu, entry + i, 8);
+        limit_raw = (uint32_t)(d[0] | (d[1] << 8) | ((d[6] & 0x0F) << 16));
+        access = d[5]; flags = d[6];
+        uint32_t b = (uint32_t)d[2] | ((uint32_t)d[3] << 8) | ((uint32_t)d[4] << 16) | ((uint32_t)d[7] << 24);
+        if (flags & 0x20) { /* 64-bit descriptor in 32-bit mode? ignore */ }
+        cpu->seg_base[seg_index] = b;
+        cpu->seg_limit[seg_index] = (flags & 0x80) ? ((limit_raw << 12) | 0xFFF) : limit_raw;
+        cpu->seg_sel[seg_index] = selector;
+        cpu->seg_attr[seg_index] = access;
+        cpu->seg_flags[seg_index] = flags;
+        cpu->sregs[seg_index] = selector;
+        return 0;
+    } else {
+        if (cpu->gdtr_base == 0) return -1;
+        if ((uint32_t)index * 8u + 7u > cpu->gdtr_limit) return -1;
+        uint64_t entry = cpu->gdtr_base + (uint64_t)index * 8u;
+        uint8_t d[8];
+        for (int i = 0; i < 8; i++) d[i] = (uint8_t)phys_read_raw(cpu, entry + i, 8);
+        limit_raw = (uint32_t)(d[0] | (d[1] << 8) | ((d[6] & 0x0F) << 16));
+        access = d[5]; flags = d[6];
+        uint32_t b = (uint32_t)d[2] | ((uint32_t)d[3] << 8) | ((uint32_t)d[4] << 16) | ((uint32_t)d[7] << 24);
+        if ((flags & 0x20) && (access & 0x08)) {
+            /* 64-bit code descriptor: base is 32-bit */
+        }
+        cpu->seg_base[seg_index] = b;
+        cpu->seg_limit[seg_index] = (flags & 0x80) ? ((limit_raw << 12) | 0xFFF) : limit_raw;
+        cpu->seg_sel[seg_index] = selector;
+        cpu->seg_attr[seg_index] = access;
+        cpu->seg_flags[seg_index] = flags;
+        cpu->sregs[seg_index] = selector;
+        /* FS/GS base override in long mode via descriptor? Keep MSR base if set */
+        if (cpu->mode == X86_MODE_64 && (seg_index == X86_FS || seg_index == X86_GS)) {
+            /* In long mode, FS/GS base from descriptor is ignored if MSR base set? Actually descriptor load sets base, MSR overrides. Keep descriptor base. */
+        }
+        return 0;
+    }
+}
+
+/* ---------- MSR ---------- */
+uint64_t x86_read_msr(X86Cpu* cpu, uint32_t msr) {
+    switch (msr) {
+        case X86_MSR_EFER: return cpu->efer;
+        case X86_MSR_STAR: return cpu->msr_star;
+        case X86_MSR_LSTAR: return cpu->msr_lstar;
+        case X86_MSR_FMASK: return cpu->msr_fmask;
+        case X86_MSR_FS_BASE: return cpu->msr_fs_base;
+        case X86_MSR_GS_BASE: return cpu->msr_gs_base;
+        case X86_MSR_KERNEL_GS_BASE: return cpu->msr_kernel_gs_base;
+        case X86_MSR_TSC_AUX: return cpu->msr_tsc_aux;
+        case X86_MSR_PAT: return cpu->msr_pat;
+        case X86_MSR_TSC: return cpu->tsc;
+        case X86_MSR_APIC_BASE: return cpu->apic_base ? cpu->apic_base : 0xFEE00000ULL;
+        case X86_MSR_SYSENTER_CS: return cpu->msr_sysenter_cs;
+        case X86_MSR_SYSENTER_ESP: return cpu->msr_sysenter_esp;
+        case X86_MSR_SYSENTER_EIP: return cpu->msr_sysenter_eip;
+        case 0xC0000104: return 0; /* TSC_AUX? */
+        case 0xC0010015: return 0; /* SYS_CFG */
+        case 0xC001001A: return 0; /* SYSCFG? */
+        default: return 0;
+    }
+}
+void x86_write_msr(X86Cpu* cpu, uint32_t msr, uint64_t value) {
+    switch (msr) {
+        case X86_MSR_EFER: cpu->efer = value; break;
+        case X86_MSR_STAR: cpu->msr_star = value; break;
+        case X86_MSR_LSTAR: cpu->msr_lstar = value; break;
+        case X86_MSR_FMASK: cpu->msr_fmask = value; break;
+        case X86_MSR_FS_BASE: cpu->msr_fs_base = value; cpu->seg_base[X86_FS] = value; break;
+        case X86_MSR_GS_BASE: cpu->msr_gs_base = value; cpu->seg_base[X86_GS] = value; break;
+        case X86_MSR_KERNEL_GS_BASE: cpu->msr_kernel_gs_base = value; break;
+        case X86_MSR_TSC_AUX: cpu->msr_tsc_aux = value; break;
+        case X86_MSR_PAT: cpu->msr_pat = value; break;
+        case X86_MSR_TSC: cpu->tsc = value; break;
+        case X86_MSR_APIC_BASE: cpu->apic_base = value; break;
+        case X86_MSR_SYSENTER_CS: cpu->msr_sysenter_cs = value; break;
+        case X86_MSR_SYSENTER_ESP: cpu->msr_sysenter_esp = value; break;
+        case X86_MSR_SYSENTER_EIP: cpu->msr_sysenter_eip = value; break;
+        default: break;
+    }
+}
+
+/* ---------- Доставка прерываний/исключений ---------- */
+void x86_deliver_interrupt(X86Cpu* cpu, uint8_t vector, uint32_t error_code, int has_error) {
+    if (cpu->in_interrupt) return;
+    cpu->in_interrupt = 1;
+    if (cpu->mode == X86_MODE_16) {
+        /* Firmware-хук для BIOS-векторов в реальном режиме */
+        if (cpu->interrupt_hook && cpu->interrupt_hook(cpu->context, vector)) {
+            cpu->in_interrupt = 0;
+            return;
+        }
+        x86_push(cpu, cpu->flags);
+        set_flag(cpu, X86_IF, 0);
+        set_flag(cpu, X86_TF, 0);
+        x86_push(cpu, cpu->sregs[X86_CS]);
+        x86_push(cpu, cpu->ip);
+        uint32_t entry = (uint32_t)vector * 4u;
+        cpu->ip = x86_read_word(cpu, entry);
+        cpu->sregs[X86_CS] = x86_read_word(cpu, entry + 2u);
+        cpu->seg_base[X86_CS] = (uint64_t)cpu->sregs[X86_CS] * 16u;
+        cpu->in_interrupt = 0;
+        return;
+    }
+    /* Same-privilege protected/long-mode interrupt and trap gates.
+     * TSS stack switching and IST are not implemented: fail rather than
+     * silently building a corrupt privilege-transition frame. */
+    const int long_mode = cpu->mode == X86_MODE_64;
+    const unsigned gate_size = long_mode ? 16u : 8u;
+    const uint64_t gate_offset = (uint64_t)vector * gate_size;
+    if (gate_offset + gate_size - 1 > cpu->idtr_limit) {
+        cpu->triple_fault = cpu->halted = 1; cpu->in_interrupt = 0; return;
+    }
+    uint8_t d[16] = {0};
+    for (unsigned i = 0; i < gate_size; ++i) {
+        int pf = -1;
+        uint64_t physical = x86_translate(cpu, cpu->idtr_base + gate_offset + i, 0, 0, &pf);
+        if (pf >= 0) { cpu->triple_fault = cpu->halted = 1; cpu->in_interrupt = 0; return; }
+        d[i] = (uint8_t)phys_read_raw(cpu, physical, 8);
+    }
+    const int type = d[5] & 15;
+    const uint16_t selector = (uint16_t)(d[2] | (d[3] << 8));
+    if (!(d[5] & 0x80) || (type != 0xE && type != 0xF &&
+                            (long_mode || (type != 0x6 && type != 0x7))) ||
+        (long_mode && (d[4] & 7)) || (selector & 3) != cpu->cpl) {
+        cpu->triple_fault = cpu->halted = 1; cpu->in_interrupt = 0; return;
+    }
+    uint64_t handler = d[0] | ((uint64_t)d[1] << 8) |
+                       ((uint64_t)d[6] << 16) | ((uint64_t)d[7] << 24);
+    if (long_mode) handler |= (uint64_t)(d[8] | (d[9] << 8) |
+                                        (d[10] << 16) | ((uint32_t)d[11] << 24)) << 32;
+    const uint16_t old_cs = cpu->sregs[X86_CS];
+    if (x86_load_segment(cpu, X86_CS, selector) != 0) {
+        cpu->triple_fault = cpu->halted = 1; cpu->in_interrupt = 0; return;
+    }
+    int width = long_mode ? 64 : (type == 6 || type == 7) ? 16 : 32;
+    int stack_width = long_mode ? 64 : (cpu->seg_flags[X86_SS] & 0x40) ? 32 : 16;
+    uint64_t stack_mask = stack_width == 64 ? UINT64_MAX :
+                          stack_width == 32 ? UINT32_MAX : UINT16_MAX;
+    uint64_t values[4] = { cpu->flags | 2u, old_cs, cpu->rip, error_code };
+    int count = has_error ? 4 : 3;
+    uint64_t rsp = cpu->gpr[X86_RSP];
+    for (int i = 0; i < count; ++i) {
+        uint64_t sp = ((rsp & stack_mask) - (unsigned)(width / 8)) & stack_mask;
+        rsp = (rsp & ~stack_mask) | sp;
+        uint64_t address = cpu->seg_base[X86_SS] + sp;
+        int pf = -1;
+        uint64_t physical = x86_translate(cpu, address, 1, 0, &pf);
+        if (pf >= 0) { cpu->triple_fault = cpu->halted = 1; cpu->in_interrupt = 0; return; }
+        phys_write_raw(cpu, physical, width, values[i]);
+    }
+    cpu->gpr[X86_RSP] = rsp;
+    if (type == 0xE || type == 0x6) set_flag(cpu, X86_IF, 0);
+    set_flag(cpu, X86_TF, 0);
+    cpu->rip = handler;
+    cpu->ip = (uint16_t)handler;
+    cpu->in_interrupt = 0;
+}
+void x86_deliver_exception(X86Cpu* cpu, uint8_t vector, uint32_t error_code) {
+    int has_error = (vector == 8 || vector == 10 || vector == 11 || vector == 12 || vector == 13 || vector == 14 || vector == 17 || vector == 21 || vector == 29 || vector == 30);
+    /* #PF, #GP, #SS, #NP, #TS, #AC, #VC, #SX */
+    if (cpu->mode == X86_MODE_16) {
+        /* В реальном режиме исключения идут через IVT, но BIOS-хук их не перехватывает кроме INT3/overflow */
+        /* Для divide error и т.д. просто через IVT */
+        x86_push(cpu, cpu->flags);
+        set_flag(cpu, X86_IF, 0);
+        set_flag(cpu, X86_TF, 0);
+        x86_push(cpu, cpu->sregs[X86_CS]);
+        x86_push(cpu, cpu->ip);
+        uint32_t entry = (uint32_t)vector * 4u;
+        cpu->ip = x86_read_word(cpu, entry);
+        cpu->rip = cpu->ip;
+        cpu->sregs[X86_CS] = x86_read_word(cpu, entry + 2u);
+        cpu->seg_sel[X86_CS] = cpu->sregs[X86_CS];
+        cpu->seg_base[X86_CS] = (uint64_t)cpu->sregs[X86_CS] << 4;
+        return;
+    }
+    x86_deliver_interrupt(cpu, vector, error_code, has_error);
+}
+int x86_check_and_deliver_irq(X86Cpu* cpu) {
+    if (!cpu->irq_check) return 0;
+    if (cpu->halted) {
+        /* HLT: просыпаемся только если IF=1 и есть IRQ */
+        if (!(cpu->flags & X86_IF)) return 0;
+        int vec = cpu->irq_check(cpu->context);
+        if (vec < 0) return 0;
+        cpu->halted = 0;
+        x86_deliver_interrupt(cpu, (uint8_t)vec, 0, 0);
+        return 1;
+    }
+    if (!(cpu->flags & X86_IF)) return 0;
+    if (cpu->sti_shadow > 0) return 0;
+    int vec = cpu->irq_check(cpu->context);
+    if (vec < 0) return 0;
+    x86_deliver_interrupt(cpu, (uint8_t)vec, 0, 0);
+    return 1;
+}
+
 
 uint16_t x86_read_word(const X86Cpu* cpu, uint32_t physical) {
     return (uint16_t)(x86_read_byte(cpu, physical)
@@ -67,19 +470,19 @@ void x86_write_word(X86Cpu* cpu, uint32_t physical, uint16_t value) {
 }
 
 static uint8_t mem_read8(const X86Cpu* cpu, uint16_t segment, uint16_t offset) {
-    return x86_read_byte(cpu, x86_physical(segment, offset));
+    return x86_read_byte(cpu, x86_physical_a20(cpu, segment, offset));
 }
 
 static void mem_write8(X86Cpu* cpu, uint16_t segment, uint16_t offset, uint8_t value) {
-    x86_write_byte(cpu, x86_physical(segment, offset), value);
+    x86_write_byte(cpu, x86_physical_a20(cpu, segment, offset), value);
 }
 
 static uint16_t mem_read16(const X86Cpu* cpu, uint16_t segment, uint16_t offset) {
-    return x86_read_word(cpu, x86_physical(segment, offset));
+    return x86_read_word(cpu, x86_physical_a20(cpu, segment, offset));
 }
 
 static void mem_write16(X86Cpu* cpu, uint16_t segment, uint16_t offset, uint16_t value) {
-    x86_write_word(cpu, x86_physical(segment, offset), value);
+    x86_write_word(cpu, x86_physical_a20(cpu, segment, offset), value);
 }
 
 /* ---------------- Выборка инструкций ---------------- */
@@ -337,27 +740,36 @@ uint16_t x86_pop(X86Cpu* cpu) {
 }
 
 void x86_raise_interrupt(X86Cpu* cpu, uint8_t vector) {
-    if (cpu->interrupt_hook && cpu->interrupt_hook(cpu->context, vector)) {
-        return;
-    }
-    x86_push(cpu, cpu->flags);
-    set_flag(cpu, X86_IF, 0);
-    set_flag(cpu, X86_TF, 0);
-    x86_push(cpu, cpu->sregs[X86_CS]);
-    x86_push(cpu, cpu->ip);
-    const uint32_t entry = (uint32_t)vector * 4u;
-    cpu->ip = x86_read_word(cpu, entry);
-    cpu->sregs[X86_CS] = x86_read_word(cpu, entry + 2u);
+    x86_deliver_interrupt(cpu, vector, 0, 0);
 }
 
 void x86_reset(X86Cpu* cpu, uint8_t* memory, size_t memory_size) {
-    /* Выбранную пользователем разрядность сохраняем через сброс. */
     const X86Mode max_mode = cpu->max_mode;
+    void* ctx = cpu->context;
+    X86PortIn pin = cpu->port_in;
+    X86PortOut pout = cpu->port_out;
+    X86MmioRead mr = cpu->mmio_read;
+    X86MmioWrite mw = cpu->mmio_write;
+    X86MmioCheck mc = cpu->mmio_check;
+    X86IrqCheck iq = cpu->irq_check;
+    int (*hook)(void*, uint8_t) = cpu->interrupt_hook;
     memset(cpu, 0, sizeof(*cpu));
     cpu->memory = memory;
     cpu->memory_size = memory_size;
     cpu->flags = 0x0002u;
     cpu->max_mode = max_mode;
+    cpu->context = ctx;
+    cpu->port_in = pin;
+    cpu->port_out = pout;
+    cpu->mmio_read = mr;
+    cpu->mmio_write = mw;
+    cpu->mmio_check = mc;
+    cpu->irq_check = iq;
+    cpu->interrupt_hook = hook;
+    cpu->apic_base = 0xFEE00000ULL;
+    cpu->msr_pat = 0x0007010600070106ULL;
+    cpu->x87_cw = 0x037F;
+    cpu->x87_top = 0;
 }
 
 /* ---------------- Порты ---------------- */
@@ -479,9 +891,21 @@ static void string_operation(X86Cpu* cpu, uint8_t opcode, int repetition, int se
 /* ---------------- Одна инструкция ---------------- */
 
 int x86_step(X86Cpu* cpu) {
-    if (cpu->halted || cpu->waiting || cpu->fault) {
+    if (cpu->fault) return 0;
+    if (cpu->waiting) return 0;
+    if (cpu->halted) {
+        if (x86_check_and_deliver_irq(cpu)) {
+            cpu->instructions += 1;
+            return 1;
+        }
         return 0;
     }
+    if (cpu->sti_shadow > 0) cpu->sti_shadow--;
+    else if (x86_check_and_deliver_irq(cpu)) {
+        cpu->instructions += 1;
+        return 1;
+    }
+    cpu->tsc += 3;
     if (cpu->mode != X86_MODE_16) {
         return x86_wide_step(cpu);
     }
@@ -505,6 +929,8 @@ int x86_step(X86Cpu* cpu) {
             case 0x2E: segment_override = X86_CS; continue;
             case 0x36: segment_override = X86_SS; continue;
             case 0x3E: segment_override = X86_DS; continue;
+            case 0x64: segment_override = X86_FS; continue;
+            case 0x65: segment_override = X86_GS; continue;
             case 0x66: case 0x67: wide_prefix = 1; continue;      /* 32 бита */
             default: break;
         }
@@ -535,14 +961,13 @@ int x86_step(X86Cpu* cpu) {
                 source = destination;
                 destination = width == 8 ? get_reg8(cpu, modrm.reg) : cpu->regs[modrm.reg];
                 const uint16_t result = alu(cpu, operation, destination, source, width);
-                if (width == 8) {
-                    set_reg8(cpu, modrm.reg, (uint8_t)result);
-                } else {
-                    cpu->regs[modrm.reg] = result;
+                if (operation != 7) {
+                    if (width == 8) set_reg8(cpu, modrm.reg, (uint8_t)result);
+                    else cpu->regs[modrm.reg] = result;
                 }
             } else {
                 const uint16_t result = alu(cpu, operation, destination, source, width);
-                write_rm(cpu, &modrm, width, result);
+                if (operation != 7) write_rm(cpu, &modrm, width, result);
             }
         } else {
             const uint16_t immediate = width == 8 ? fetch8(cpu) : fetch16(cpu);
@@ -747,11 +1172,22 @@ int x86_step(X86Cpu* cpu) {
         }
         case 0x8C: case 0x8E: {
             const ModRM modrm = decode_modrm(cpu, segment_override);
-            const int index = modrm.reg & 3;
+            const int index = modrm.reg;
+            if (index >= 6 || (opcode == 0x8E && index == X86_CS)) {
+                cpu->fault = 1;
+                cpu->fault_opcode = opcode;
+                break;
+            }
             if (opcode == 0x8C) {
                 write_rm(cpu, &modrm, 16, cpu->sregs[index]);
             } else {
-                cpu->sregs[index] = read_rm(cpu, &modrm, 16);
+                uint16_t v = read_rm(cpu, &modrm, 16);
+                if (x86_load_segment(cpu, index, v) != 0) {
+                    cpu->fault = 1;
+                    cpu->fault_opcode = opcode;
+                    break;
+                }
+                if (index == X86_SS) cpu->mov_ss_shadow = 1;
             }
             break;
         }
@@ -790,9 +1226,9 @@ int x86_step(X86Cpu* cpu) {
         }
         case 0x9B: break; /* WAIT */
         case 0x9C: x86_push(cpu, cpu->flags); break;
-        case 0x9D: cpu->flags = x86_pop(cpu) | 0x0002u; break;
+        case 0x9D: cpu->flags = (cpu->flags & 0xffff0000u) | x86_pop(cpu) | 0x0002u; break;
         case 0x9E: /* SAHF */
-            cpu->flags = (uint16_t)((cpu->flags & 0xFF00u) | get_reg8(cpu, 4));
+            cpu->flags = (cpu->flags & ~0xffu) | get_reg8(cpu, 4);
             break;
         case 0x9F: set_reg8(cpu, 4, (uint8_t)(cpu->flags & 0xFFu)); break;
 
@@ -916,7 +1352,7 @@ int x86_step(X86Cpu* cpu) {
         case 0xCF:
             cpu->ip = x86_pop(cpu);
             cpu->sregs[X86_CS] = x86_pop(cpu);
-            cpu->flags = x86_pop(cpu) | 0x0002u;
+            cpu->flags = (cpu->flags & 0xffff0000u) | x86_pop(cpu) | 0x0002u;
             break;
 
         case 0xD4: { /* AAM */
@@ -1102,8 +1538,8 @@ int x86_step(X86Cpu* cpu) {
         }
         case 0xF8: set_flag(cpu, X86_CF, 0); break;
         case 0xF9: set_flag(cpu, X86_CF, 1); break;
-        case 0xFA: set_flag(cpu, X86_IF, 0); break;
-        case 0xFB: set_flag(cpu, X86_IF, 1); break;
+        case 0xFA: set_flag(cpu, X86_IF, 0); cpu->sti_shadow=0; break;
+        case 0xFB: set_flag(cpu, X86_IF, 1); cpu->sti_shadow=1; break;
         case 0xFC: set_flag(cpu, X86_DF, 0); break;
         case 0xFD: set_flag(cpu, X86_DF, 1); break;
         case 0xFE: {

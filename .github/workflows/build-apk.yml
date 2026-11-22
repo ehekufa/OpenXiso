@@ -7,7 +7,7 @@ name: Сборка APK OpenXiso
 on:
   push:
     branches:
-      - arena/47099952-openxiso
+      - 'arena/**'
       - main
     tags:
       - 'v*'
@@ -63,6 +63,7 @@ jobs:
             app/src/main/cpp/boot_image.c \
             app/src/main/cpp/legacy_bios.c \
             app/src/main/cpp/pc_machine.c \
+            app/src/main/cpp/devices.c \
             app/src/main/cpp/tests/test_emulator.c -o /tmp/openxiso_emulator_san
           /tmp/openxiso_emulator_san
           gcc -std=c11 -Wall -Wextra -Wpedantic -Werror -O1 -g \
@@ -74,6 +75,7 @@ jobs:
             app/src/main/cpp/boot_image.c \
             app/src/main/cpp/legacy_bios.c \
             app/src/main/cpp/pc_machine.c \
+            app/src/main/cpp/devices.c \
             app/src/main/cpp/tests/test_wide.c -o /tmp/openxiso_wide_san
           /tmp/openxiso_wide_san
 
@@ -143,19 +145,18 @@ jobs:
           echo "Собранные файлы:"
           ls -lh app/build/outputs/apk/*/*.apk
 
-          APK="app/build/outputs/apk/debug/app-debug.apk"
-          if [[ ! -f "$APK" ]]; then
-            echo "Отладочный APK не найден" >&2
-            exit 1
-          fi
-          echo "Ключевые записи внутри APK:"
-          unzip -l "$APK" | grep -E 'classes.dex|lib/.*/libopenxiso.so|AndroidManifest.xml|resources.arsc' || true
-          for abi in arm64-v8a armeabi-v7a x86_64; do
-            if ! unzip -l "$APK" | grep -q "lib/$abi/libopenxiso.so"; then
-              echo "Отсутствует libopenxiso.so для $abi" >&2
-              exit 1
-            fi
-            echo "Нативная библиотека для $abi: присутствует"
+          for APK in app/build/outputs/apk/*/*.apk; do
+            echo "Проверка $APK"
+            entries="$(unzip -Z -1 "$APK")"
+            for entry in classes.dex AndroidManifest.xml resources.arsc \
+                         lib/arm64-v8a/libopenxiso.so lib/armeabi-v7a/libopenxiso.so \
+                         lib/x86_64/libopenxiso.so; do
+              if ! grep -Fxq "$entry" <<< "$entries"; then
+                echo "Отсутствует $entry в $APK" >&2
+                exit 1
+              fi
+              echo "Найден $entry"
+            done
           done
           {
             echo "### APK собран и проверен"

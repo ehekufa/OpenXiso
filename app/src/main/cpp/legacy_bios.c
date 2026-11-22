@@ -596,7 +596,19 @@ static void bios_bootstrap(PcMachine* machine) {
 static void bios_system(PcMachine* machine) {
     const uint8_t function = reg8(machine, 4);
     if (function == 0x88) {
-        machine->cpu.regs[X86_AX] = 0x0000u;
+        size_t extended_kb = machine->memory_size > 1024u * 1024u
+            ? (machine->memory_size - 1024u * 1024u) / 1024u : 0;
+        machine->cpu.regs[X86_AX] = (uint16_t)(extended_kb > 0xFFFFu ? 0xFFFFu : extended_kb);
+        carry(machine, 0);
+    } else if (function == 0x24) {
+        switch (reg8(machine, 0)) {
+            case 0: machine->cpu.a20_enabled = 0; break;
+            case 1: machine->cpu.a20_enabled = 1; break;
+            case 2: set_reg8(machine, 0, machine->cpu.a20_enabled ? 1 : 0); break;
+            case 3: machine->cpu.regs[X86_BX] = 3; break;
+            default: set_reg8(machine, 4, 0x86); carry(machine, 1); return;
+        }
+        set_reg8(machine, 4, 0);
         carry(machine, 0);
     } else {
         set_reg8(machine, 4, 0x86u);
