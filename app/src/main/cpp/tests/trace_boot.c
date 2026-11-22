@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Cannot start image\n"); return 2;
     }
     Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0; int follow = 0;
-    unsigned disk_reports = 0, cr0_reports = 0;
+    unsigned disk_reports = 0, cr0_reports = 0; int ud_reported = 0;
     signal(SIGALRM, timeout_handler);
     alarm(20);
     for (unsigned i = 0; i < 20000000; i++) {
@@ -82,8 +82,19 @@ int main(int argc, char **argv) {
         if (report_disk) { printf("BIOS before: "); print_trace(&t); }
         int running = openxiso_machine_run_slice(m, 1);
         if (report_disk) { Trace after = capture(m); printf("BIOS after:  "); print_trace(&after); }
+        if (!ud_reported && (m->cpu.cr0 & X86_CR0_PE) && m->cpu.idtr_limit >= 55) {
+            uint64_t gate = x86_read_physical(&m->cpu, m->cpu.idtr_base + 6 * 8, 64);
+            uint64_t handler = (gate & 0xffffu) | ((gate >> 32) & 0xffff0000u);
+            if ((gate & (UINT64_C(1) << 47)) && m->cpu.rip == handler &&
+                m->cpu.sregs[X86_CS] == ((gate >> 16) & 0xffffu)) {
+                ud_reported = 1;
+                puts("First invalid-opcode exception:");
+                unsigned first = count > 12 ? count - 12 : 0;
+                for (unsigned j = first; j < count; j++) print_trace(&ring[j % 48]);
+            }
+        }
         if (t.cr0 != m->cpu.cr0 && cr0_reports++ < 4) {
-            follow = 20;
+            follow = 5;
             printf("CR0 change: "); print_trace(&t);
             printf("CR0 after: %08x GDTR=%" PRIx64 ":%04x IDTR=%" PRIx64 ":%04x\n",
                    m->cpu.cr0, m->cpu.gdtr_base, m->cpu.gdtr_limit,
