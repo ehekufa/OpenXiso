@@ -47,15 +47,17 @@ int main(int argc, char **argv) {
         openxiso_machine_load_image(m, fd, st.st_size) || openxiso_machine_start(m)) {
         fprintf(stderr, "Cannot start image\n"); return 2;
     }
-    Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0;
+    Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0; int follow = 0;
     for (unsigned i = 0; i < 20000000; i++) {
         Trace t = capture(m); ring[count++ % 48] = t;
+        if (follow > 0) { printf("Transition: "); print_trace(&t); --follow; }
         int disk = t.bytes[0] == 0xcd && t.bytes[1] == 0x13 &&
                    ((t.ax >> 8) == 0x4b || (t.ax >> 8) == 0x42);
         if (disk) { printf("BIOS before: "); print_trace(&t); }
         int running = openxiso_machine_run_slice(m, 1);
         if (disk) { Trace after = capture(m); printf("BIOS after:  "); print_trace(&after); }
         if (t.cr0 != m->cpu.cr0) {
+            follow = 20;
             printf("CR0 change: "); print_trace(&t);
             printf("CR0 after: %08x GDTR=%" PRIx64 ":%04x IDTR=%" PRIx64 ":%04x\n",
                    m->cpu.cr0, m->cpu.gdtr_base, m->cpu.gdtr_limit,
