@@ -225,6 +225,11 @@ int openxiso_machine_start(PcMachine* machine) {
     machine->cpu.interrupt_hook = machine_interrupt_hook;
     machine->cpu.flags = 0x0002u;
     devices_reset(machine);
+    /* Legacy POST programs PIT channel 0 and unmasks its timer IRQ. */
+    devices_port_out(machine, 0x43, 0x36);
+    devices_port_out(machine, 0x40, 0);
+    devices_port_out(machine, 0x40, 0);
+    devices_port_out(machine, 0x21, 0xfe);
 
     machine->cpu.sregs[X86_CS] = 0xF000u;
     machine->cpu.ip = 0xFFF0u;
@@ -278,9 +283,6 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
         devices_tick(machine, 1);
         if (machine->cpu.waiting || machine->cpu.halted || machine->cpu.fault ||
             machine->cpu.triple_fault) break;
-        if ((machine->cpu.instructions & 0x3FFFu) == 0u) {
-            machine->ticks += 1u;
-        }
     }
     if (machine->cpu.triple_fault) {
         snprintf(machine->error, sizeof(machine->error), "Тройная ошибка (triple fault): нет обработчика исключения");

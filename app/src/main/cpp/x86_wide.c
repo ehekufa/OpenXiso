@@ -1686,11 +1686,11 @@ int x86_wide_step(X86Cpu* cpu) {
                     uint64_t di = get_gpr(cpu,X86_RDI,address_width);
                     uint64_t src_addr = linearize(cpu, si, segment);
                     uint64_t dst_addr = linearize(cpu, di, X86_ES);
-                    if (opcode==0xA4||opcode==0xA5) { uint64_t v=read_mem(cpu,src_addr,w); write_mem(cpu,dst_addr,w,v); }
-                    else if (opcode==0xA6||opcode==0xA7) { uint64_t a=read_mem(cpu,src_addr,w); uint64_t b=read_mem(cpu,dst_addr,w); wide_alu(cpu,7,a,b,w); }
+                    if (opcode==0xA4||opcode==0xA5) { uint64_t v=read_mem(cpu,src_addr,w); if (!cpu->pf_pending) write_mem(cpu,dst_addr,w,v); }
+                    else if (opcode==0xA6||opcode==0xA7) { uint64_t a=read_mem(cpu,src_addr,w); if (!cpu->pf_pending) { uint64_t b=read_mem(cpu,dst_addr,w); if (!cpu->pf_pending) wide_alu(cpu,7,a,b,w); } }
                     else if (opcode==0xAA||opcode==0xAB) { uint64_t v = w==8?get_reg8(cpu,0,rex_present):get_gpr(cpu,X86_RAX,w); write_mem(cpu,dst_addr,w,v); }
-                    else if (opcode==0xAC||opcode==0xAD) { uint64_t v=read_mem(cpu,src_addr,w); if(w==8) set_reg8(cpu,0,rex_present,(uint8_t)v); else set_gpr(cpu,X86_RAX,w,v); }
-                    else { uint64_t a = w==8?get_reg8(cpu,0,rex_present):get_gpr(cpu,X86_RAX,w); uint64_t b=read_mem(cpu,dst_addr,w); wide_alu(cpu,7,a,b,w); }
+                    else if (opcode==0xAC||opcode==0xAD) { uint64_t v=read_mem(cpu,src_addr,w); if (!cpu->pf_pending) { if(w==8) set_reg8(cpu,0,rex_present,(uint8_t)v); else set_gpr(cpu,X86_RAX,w,v); } }
+                    else { uint64_t a = w==8?get_reg8(cpu,0,rex_present):get_gpr(cpu,X86_RAX,w); uint64_t b=read_mem(cpu,dst_addr,w); if (!cpu->pf_pending) wide_alu(cpu,7,a,b,w); }
                     if (cpu->pf_pending) break;
                     if (opcode!=0xAA && opcode!=0xAB && opcode!=0xAE && opcode!=0xAF) set_gpr(cpu,X86_RSI,address_width, si+step);
                     if (opcode!=0xAC && opcode!=0xAD) set_gpr(cpu,X86_RDI,address_width, di+step);

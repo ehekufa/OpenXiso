@@ -660,16 +660,19 @@ static void bios_time(PcMachine* machine) {
     if (reg8(machine, 4) == 0x00u) {
         machine->cpu.regs[X86_CX] = (uint16_t)(machine->ticks >> 16);
         machine->cpu.regs[X86_DX] = (uint16_t)(machine->ticks & 0xFFFFu);
-        set_reg8(machine, 0, 0x00u);
+        set_reg8(machine, 0, x86_read_byte(&machine->cpu, 0x0470u));
+        x86_write_byte(&machine->cpu, 0x0470u, 0);
     }
 }
 
 void legacy_bios_interrupt(PcMachine* machine, uint8_t vector) {
     switch (vector) {
         case 0x08:
-            machine->ticks += 1u;
-            x86_write_word(&machine->cpu, 0x046Cu,
-                           (uint16_t)(machine->ticks & 0xFFFFu));
+            machine->ticks = (machine->ticks + 1u) % 0x1800b0u;
+            x86_write_word(&machine->cpu, 0x046Cu, (uint16_t)machine->ticks);
+            x86_write_word(&machine->cpu, 0x046Eu, (uint16_t)(machine->ticks >> 16));
+            if (machine->ticks == 0) x86_write_byte(&machine->cpu, 0x0470u, 1);
+            devices_port_out(machine, 0x20, 0x20); /* EOI */
             break;
         case 0x10: bios_video(machine); break;
         case 0x11:

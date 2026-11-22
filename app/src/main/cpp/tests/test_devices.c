@@ -206,6 +206,19 @@ static void test_rep_string_count(PcMachine* m) {
     CHECK(x86_step(c)); CHECK(c->rip == 0x502 && c->gpr[X86_RCX] == 1);
     CHECK(x86_step(c)); CHECK(c->rip == 0x504 && c->gpr[X86_RCX] == 0);
     CHECK(m->memory[0x3400] == 0x5a);
+    /* REPE CMPS stops at the first mismatch; zero count touches nothing. */
+    const uint8_t cmps[] = {0xf3, 0xa6, 0xf2, 0xae};
+    memcpy(m->memory + 0x504, cmps, sizeof(cmps));
+    memcpy(m->memory + 0x4000, "abcX", 4);
+    memcpy(m->memory + 0x5000, "abcY", 4);
+    c->gpr[X86_RSI] = 0x4000; c->gpr[X86_RDI] = 0x5000; c->gpr[X86_RCX] = 8;
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 4 && c->gpr[X86_RSI] == 0x4004 &&
+          c->gpr[X86_RDI] == 0x5004 && !(c->flags & X86_ZF));
+    c->gpr[X86_RCX] = 0; c->gpr[X86_RDI] = 0xffffffffu;
+    uint32_t flags = c->flags;
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 0 && c->gpr[X86_RDI] == 0xffffffffu && c->flags == flags);
 }
 
 static void test_wide_byte_inc_dec(PcMachine* m) {
@@ -232,6 +245,29 @@ static void test_wide_leave(PcMachine* m) {
     m->memory[0x500] = 0xc9; x86_write_physical(c, 0x10000, 32, 0x87654321);
     CHECK(x86_step(c));
     CHECK(c->gpr[X86_RSP] == 0x10004 && c->gpr[X86_RBP] == 0x87654321);
+}
+
+static void test_bios_timer(PcMachine* m) {
+    x86_reset(&m->cpu, m->memory, m->memory_size);
+    devices_reset(m);
+    devices_port_out(m, 0x43, 0x36);
+    devices_port_out(m, 0x40, 0); devices_port_out(m, 0x40, 0);
+    devices_port_out(m, 0x21, 0xfe);
+    m->ticks = 0xffff;
+    devices_tick(m, 5500000);
+    CHECK(devices_irq_check(m) == 8);
+    legacy_bios_interrupt(m, 8);
+    CHECK(m->ticks == 0x10000 && x86_read_word(&m->cpu, 0x46c) == 0 &&
+          x86_read_word(&m->cpu, 0x46e) == 1);
+    devices_tick(m, 5500000);
+    CHECK(devices_irq_check(m) == 8); /* BIOS EOI permits the next IRQ */
+    legacy_bios_interrupt(m, 8);
+    m->ticks = 0x1800af;
+    legacy_bios_interrupt(m, 8);
+    CHECK(m->ticks == 0 && x86_read_byte(&m->cpu, 0x470) == 1);
+    m->cpu.regs[X86_AX] = 0;
+    legacy_bios_interrupt(m, 0x1a);
+    CHECK((m->cpu.regs[X86_AX] & 0xff) == 1 && x86_read_byte(&m->cpu, 0x470) == 0);
 }
 
 static void test_real_exception(PcMachine* m) {
@@ -456,6 +492,7 @@ int main(void) {
     test_rep_string_count(m);
     test_wide_byte_inc_dec(m);
     test_wide_leave(m);
+    test_bios_timer(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);
