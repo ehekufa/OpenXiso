@@ -1341,6 +1341,22 @@ int x86_wide_step(X86Cpu* cpu) {
                 set_gpr(cpu, (opcode & 7) | (rex_b ? 8 : 0), width,
                         wide_pop(cpu, width));
                 break;
+            case 0x69: case 0x6B: { /* IMUL r, r/m, immediate */
+                const WideModRM modrm = decode_modrm(cpu, address_width, segment,
+                                                     rex_r, rex_x, rex_b, rex_w, rex_present);
+                const uint64_t raw = read_rm(cpu, &modrm, width, rex_present);
+                const int64_t source = width == 16 ? (int16_t)raw :
+                                       width == 32 ? (int32_t)raw : (int64_t)raw;
+                const int64_t immediate = opcode == 0x6B ? fetch_s8(cpu) :
+                                          width == 16 ? fetch_s16(cpu) : fetch_s32(cpu);
+                int64_t result;
+                int overflow = __builtin_mul_overflow(source, immediate, &result);
+                if (width == 16) overflow |= result != (int16_t)result;
+                if (width == 32) overflow |= result != (int32_t)result;
+                set_gpr(cpu, modrm.reg, width, (uint64_t)result);
+                set_flag(cpu, X86_CF, overflow); set_flag(cpu, X86_OF, overflow);
+                break;
+            }
             case 0x60: { /* PUSHA/PUSHAD */
                 if (cpu->mode == X86_MODE_64) {
                     cpu->rip = start_rip; wide_exception(cpu, 6, 0); break;

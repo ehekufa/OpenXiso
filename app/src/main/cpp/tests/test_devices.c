@@ -153,6 +153,24 @@ static void test_ldtr_and_tr(PcMachine* m) {
     CHECK(x86_step(c)); CHECK((c->gpr[X86_RCX] & 0xffffu) == 0x28);
 }
 
+static void test_imul_immediate(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_32; c->cr0 = X86_CR0_PE;
+    c->seg_base[X86_CS] = 0; c->rip = 0x500;
+    const uint8_t code[] = {0xb8,0xfe,0xff,0xff,0xff, /* eax=-2 */
+                            0x6b,0xc0,0xfd,            /* eax *= -3 */
+                            0xb8,0xff,0xff,0xff,0x7f,
+                            0x69,0xc8,2,0,0,0};       /* ecx=eax*2 */
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    CHECK(x86_step(c)); CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RAX] == 6 && !(c->flags & (X86_CF | X86_OF)));
+    CHECK(x86_step(c)); CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 0xfffffffeu &&
+          (c->flags & (X86_CF | X86_OF)) == (X86_CF | X86_OF));
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -370,6 +388,7 @@ int main(void) {
     test_return_to_real_cs_cache(m);
     test_address32_indirect_far_call(m);
     test_ldtr_and_tr(m);
+    test_imul_immediate(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);
