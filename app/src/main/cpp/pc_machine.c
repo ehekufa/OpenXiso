@@ -67,6 +67,30 @@ static int machine_interrupt_hook(void* context, uint8_t vector) {
     return 1;
 }
 
+/* Some boot loaders invoke BIOS vectors with PUSHF + far CALL instead of
+ * INT. Intercept at the ROM entry before the compatibility stub overwrites
+ * AX/DX, and return through the caller's interrupt-compatible stack frame. */
+static int machine_firmware_entry(PcMachine* machine) {
+    X86Cpu* cpu = &machine->cpu;
+    if ((cpu->cr0 & X86_CR0_PE) || cpu->sregs[X86_CS] != 0xf000 ||
+        cpu->ip < 0x1000 || cpu->ip >= 0x2000 || ((cpu->ip - 0x1000) & 15u)) return 0;
+    uint8_t vector = (uint8_t)((cpu->ip - 0x1000) / 16);
+    legacy_bios_interrupt(machine, vector);
+    ++cpu->instructions;
+    if (cpu->waiting || cpu->halted || cpu->fault || cpu->triple_fault ||
+        cpu->sregs[X86_CS] != 0xf000) return 1;
+    const uint32_t result_flags = cpu->flags;
+    const uint16_t ip = x86_pop(cpu);
+    const uint16_t cs = x86_pop(cpu);
+    const uint16_t saved_flags = x86_pop(cpu);
+    const uint32_t returned_flags = (saved_flags & ~(X86_CF | X86_ZF)) |
+                                    (result_flags & (X86_CF | X86_ZF)) | 2u;
+    cpu->flags = (cpu->flags & 0xffff0000u) | returned_flags;
+    cpu->ip = ip;
+    x86_load_segment(cpu, X86_CS, cs);
+    return 1;
+}
+
 static uint8_t machine_port_in(void* context, uint16_t port) {
     PcMachine* machine = (PcMachine*)context;
     return devices_port_in(machine, port);
@@ -248,10 +272,12 @@ int openxiso_machine_run_slice(PcMachine* machine, uint32_t max_instructions) {
     }
 
     for (uint32_t index = 0; index < max_instructions; ++index) {
-        if (!x86_step(&machine->cpu)) {
+        if (!machine_firmware_entry(machine) && !x86_step(&machine->cpu)) {
             break;
         }
         devices_tick(machine, 1);
+        if (machine->cpu.waiting || machine->cpu.halted || machine->cpu.fault ||
+            machine->cpu.triple_fault) break;
         if ((machine->cpu.instructions & 0x3FFFu) == 0u) {
             machine->ticks += 1u;
         }

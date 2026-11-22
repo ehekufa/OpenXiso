@@ -171,6 +171,22 @@ static void test_imul_immediate(PcMachine* m) {
           (c->flags & (X86_CF | X86_OF)) == (X86_CF | X86_OF));
 }
 
+static void test_firmware_far_call(PcMachine* m) {
+    x86_reset(&m->cpu, m->memory, m->memory_size);
+    x86_set_max_mode(&m->cpu, X86_MODE_32);
+    devices_reset(m); legacy_bios_install(m);
+    m->cpu.sregs[X86_CS] = m->cpu.sregs[X86_SS] = 0;
+    m->cpu.ip = 0x500; m->cpu.regs[X86_SP] = 0x800; m->cpu.flags = 2;
+    m->status = OPENXISO_MACHINE_RUNNING;
+    const uint8_t code[] = {0xb8,0x77,0x00, 0xba,0x34,0x12, 0xf9,0x9c,
+                            0x9a,0x30,0x11,0x00,0xf0, 0xf4};
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    openxiso_machine_run_slice(m, 100);
+    CHECK(m->status == OPENXISO_MACHINE_HALTED);
+    CHECK(m->cpu.regs[X86_AX] == 0x0077 && m->cpu.regs[X86_DX] == 0x1234);
+    CHECK(!(m->cpu.flags & X86_CF) && m->cpu.regs[X86_SP] == 0x800);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -389,6 +405,7 @@ int main(void) {
     test_address32_indirect_far_call(m);
     test_ldtr_and_tr(m);
     test_imul_immediate(m);
+    test_firmware_far_call(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);
