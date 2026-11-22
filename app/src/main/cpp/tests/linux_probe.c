@@ -37,7 +37,17 @@ int main(int argc, char** argv) {
         unsigned long requested = strtoul(limit, &end, 10);
         if (end && !*end && requested > 0 && requested <= 100000) slices = requested;
     }
-    for (unsigned long i = 0; i < slices && openxiso_machine_run_slice(machine, 10000); ++i) {}
+    for (unsigned long i = 0; i < slices && openxiso_machine_run_slice(machine, 10000); ++i) {
+        if (getenv("OPENXISO_PROBE_PROGRESS") && (i + 1) % 2000 == 0) {
+            X86Cpu* c = &machine->cpu;
+            printf("progress %" PRIu64 " mode=%d cs:rip=%04x:%" PRIx64
+                   " eax=%08" PRIx64 " ecx=%08" PRIx64 " edx=%08" PRIx64
+                   " esi=%08" PRIx64 " edi=%08" PRIx64 "\n",
+                   c->instructions, c->mode, c->sregs[X86_CS], x86_wide_ip(c),
+                   c->gpr[X86_RAX], c->gpr[X86_RCX], c->gpr[X86_RDX],
+                   c->gpr[X86_RSI], c->gpr[X86_RDI]);
+        }
+    }
     printf("Статус: %d; инструкций: %" PRIu64 "; режим: %d; CS:IP=%04x:%04x\n",
            machine->status, openxiso_machine_instructions(machine), machine->cpu.mode,
            machine->cpu.sregs[X86_CS], machine->cpu.ip);

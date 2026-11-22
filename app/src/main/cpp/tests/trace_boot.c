@@ -68,7 +68,7 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Cannot start image\n"); return 2;
     }
     Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0; int follow = 0;
-    unsigned disk_reports = 0, cr0_reports = 0; int ud_reported = 0;
+    unsigned disk_reports = 0, cr0_reports = 0, firmware_reports = 0; int ud_reported = 0;
     signal(SIGALRM, timeout_handler);
     alarm(20);
     for (unsigned i = 0; i < 20000000; i++) {
@@ -76,6 +76,10 @@ int main(int argc, char **argv) {
         format_trace(last_lines[count % 48], sizeof(last_lines[0]), &t);
         ++count; last_count = (sig_atomic_t)count;
         if (follow > 0) { printf("Transition: "); print_trace(&t); --follow; }
+        if (t.cs == 0xf000 && t.ip >= 0x1000 && t.ip < 0x2000 &&
+            ((t.ip - 0x1000) % 16 == 0) && firmware_reports++ < 15) {
+            printf("Firmware entry vector %02" PRIx64 ": ", (t.ip - 0x1000) / 16); print_trace(&t);
+        }
         int disk = t.bytes[0] == 0xcd && t.bytes[1] == 0x13 &&
                    ((t.ax >> 8) == 0x4b || (t.ax >> 8) == 0x42);
         int report_disk = disk && disk_reports++ < 20;
