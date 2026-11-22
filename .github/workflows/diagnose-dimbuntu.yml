@@ -29,15 +29,15 @@ jobs:
           set -eo pipefail
           make -C openxiso/app/src/main/cpp/tests linux_probe
           sha256sum dimbuntu/build/dimbuntu-tiny.iso > probe.log
-          timeout 45 stdbuf -oL openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log || echo 'Probe time limit reached' | tee -a probe.log
+          timeout -k 3s 20s stdbuf -oL openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log || echo 'Probe time limit reached' | tee -a probe.log
           cc -std=c11 -O2 -Iopenxiso/app/src/main/cpp/include \
             openxiso/app/src/main/cpp/{openxiso_core.c,x86_cpu.c,x86_wide.c,boot_image.c,legacy_bios.c,pc_machine.c,devices.c} \
             openxiso/app/src/main/cpp/tests/trace_boot.c -o /tmp/trace_boot
-          stdbuf -oL /tmp/trace_boot dimbuntu/build/dimbuntu-tiny.iso >> probe.log || echo 'Trace time limit reached' >> probe.log
+          timeout -k 3s 30s stdbuf -oL /tmp/trace_boot dimbuntu/build/dimbuntu-tiny.iso >> probe.log || echo 'Trace time limit reached' >> probe.log
           {
             echo '### Dimbuntu probe (not a boot success test)'
             echo '```'
             cat probe.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          python3 -c 'from pathlib import Path; s=Path("probe.log").read_text(); parts=[s[i:i+2500] for i in range(0,len(s),2500)]; [print("::notice title=Trace part " + str(i+1) + "::" + p.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")) for i,p in enumerate(parts)]'
+          python3 -c 'from pathlib import Path; s=Path("probe.log").read_text(); s=s[:10000]+"\n...\n"+s[-20000:] if len(s)>30000 else s; parts=[s[i:i+2500] for i in range(0,len(s),2500)]; [print("::notice title=Trace part %02d::" % (i+1) + p.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")) for i,p in enumerate(parts)]'
