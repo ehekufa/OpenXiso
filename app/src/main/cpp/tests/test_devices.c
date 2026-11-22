@@ -73,13 +73,17 @@ static void test_unprefixed_protected_far_jump(PcMachine* m) {
     x86_set_max_mode(c, X86_MODE_32);
     c->sregs[X86_CS] = c->sregs[X86_DS] = c->sregs[X86_SS] = 0;
     c->ip = 0x500; c->regs[X86_SP] = 0x800;
-    c->gdtr_base = 0x1000; c->gdtr_limit = 0x0f;
     const uint8_t descriptor[] = {0xff,0xff,0,0,0,0x9a,0xcf,0};
     memcpy(m->memory + 0x1008, descriptor, sizeof(descriptor));
-    const uint8_t code[] = {0x66,0xb8,1,0,0,0, 0x0f,0x22,0xc0,
+    const uint8_t gdtr[] = {0x0f, 0, 0x00, 0x10, 0, 0xff};
+    memcpy(m->memory + 0xaa90, gdtr, sizeof(gdtr));
+    const uint8_t code[] = {0x0f,0x01,0x16,0x90,0xaa, /* LGDT [aa90] */
+                            0x66,0xb8,1,0,0,0, 0x0f,0x22,0xc0,
                             0xea,0x50,0x06,0x08,0x00};
     memcpy(m->memory + 0x500, code, sizeof(code));
     m->memory[0x650] = 0xf4;
+    CHECK(x86_step(c));
+    CHECK(c->gdtr_base == 0x1000 && c->gdtr_limit == 0x0f);
     CHECK(x86_step(c)); CHECK(x86_step(c));
     CHECK((c->cr0 & X86_CR0_PE) && c->mode == X86_MODE_16);
     CHECK(x86_step(c));

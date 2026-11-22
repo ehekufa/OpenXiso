@@ -409,7 +409,8 @@ static WideModRM decode_modrm(X86Cpu* cpu, int address_width, int segment,
         } else if (result.mod == 2) {
             displacement = fetch_s16(cpu);
         }
-        result.offset = (uint64_t)(int64_t)base + (uint64_t)displacement;
+        /* 16-bit effective addresses wrap, including direct disp16 >= 8000h. */
+        result.offset = (uint16_t)((uint64_t)base + (uint64_t)displacement);
         return result;
     }
 
@@ -631,8 +632,9 @@ static void wide_0f(X86Cpu* cpu, uint8_t subopcode, int width, int address_width
             const uint64_t address = modrm_address(cpu, &modrm);
             if (modrm.reg == 2 || modrm.reg == 3) {
                 const uint16_t limit = (uint16_t)read_mem(cpu, address, 16);
-                const uint64_t base = read_mem(cpu, address + 2u,
-                                               width == 64 ? 64 : 32);
+                uint64_t base = read_mem(cpu, address + 2u,
+                                         width == 64 ? 64 : 32);
+                if (width == 16) base &= 0x00ffffffu;
                 if (modrm.reg == 2) {
                     cpu->gdtr_limit = limit;
                     cpu->gdtr_base = base;
