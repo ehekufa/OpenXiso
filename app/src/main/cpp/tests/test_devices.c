@@ -92,6 +92,26 @@ static void test_unprefixed_protected_far_jump(PcMachine* m) {
     CHECK(!x86_step(c) && c->halted);
 }
 
+static void test_return_to_real_cs_cache(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_16; c->cr0 = X86_CR0_PE;
+    c->sregs[X86_CS] = c->seg_sel[X86_CS] = 0x10;
+    c->seg_base[X86_CS] = 0; c->seg_limit[X86_CS] = 0xffff;
+    c->ip = c->rip = 0x500; c->gpr[X86_RAX] = 0;
+    /* clear PE; far jump must be fetched at cached base 0, not 0x100 */
+    const uint8_t code[] = {0x0f,0x22,0xc0,0xea,0x50,0x06,0,0};
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    memset(m->memory + 0x600, 0xf4, sizeof(code));
+    m->memory[0x650] = 0xf4;
+    CHECK(x86_step(c));
+    CHECK(!(c->cr0 & X86_CR0_PE) && c->ip == 0x503);
+    CHECK(x86_step(c));
+    CHECK(c->ip == 0x650 && c->sregs[X86_CS] == 0 && c->seg_base[X86_CS] == 0);
+    CHECK(x86_step(c) && c->halted);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -306,6 +326,7 @@ int main(void) {
     test_eltorito_status(m);
     test_eltorito_load_segment(m);
     test_unprefixed_protected_far_jump(m);
+    test_return_to_real_cs_cache(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

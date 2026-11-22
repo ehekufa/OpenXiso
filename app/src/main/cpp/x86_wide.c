@@ -1143,9 +1143,10 @@ int x86_wide_step(X86Cpu* cpu) {
         cpu->rip = (uint64_t)cpu->ip;
         if (!(cpu->cr0 & X86_CR0_PE)) {
             for (int index = 0; index < 6; ++index) {
-                cpu->seg_sel[index] = cpu->sregs[index];
-                cpu->seg_base[index] = (uint64_t)cpu->sregs[index] * 16u;
-                cpu->seg_limit[index] = 0xFFFFu;
+                /* Do not discard hidden descriptor caches when PE is cleared.
+                 * Resync only if an external real-mode hook changed a selector. */
+                if (cpu->seg_sel[index] != cpu->sregs[index])
+                    x86_load_segment(cpu, index, cpu->sregs[index]);
             }
         }
     }

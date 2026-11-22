@@ -359,8 +359,7 @@ void x86_deliver_interrupt(X86Cpu* cpu, uint8_t vector, uint32_t error_code, int
         x86_push(cpu, cpu->ip);
         uint32_t entry = (uint32_t)vector * 4u;
         cpu->ip = x86_read_word(cpu, entry);
-        cpu->sregs[X86_CS] = x86_read_word(cpu, entry + 2u);
-        cpu->seg_base[X86_CS] = (uint64_t)cpu->sregs[X86_CS] * 16u;
+        x86_load_segment(cpu, X86_CS, x86_read_word(cpu, entry + 2u));
         cpu->in_interrupt = 0;
         return;
     }
@@ -488,7 +487,12 @@ static void mem_write16(X86Cpu* cpu, uint16_t segment, uint16_t offset, uint16_t
 /* ---------------- Выборка инструкций ---------------- */
 
 static uint8_t fetch8(X86Cpu* cpu) {
-    const uint8_t value = mem_read8(cpu, cpu->sregs[X86_CS], cpu->ip);
+    /* Clearing CR0.PE does not reload CS: retain the descriptor base until
+     * a far transfer actually loads CS (also needed for unreal mode). */
+    uint32_t address = cpu->wide_ready && cpu->seg_sel[X86_CS] == cpu->sregs[X86_CS]
+                       ? (uint32_t)(cpu->seg_base[X86_CS] + cpu->ip)
+                       : x86_physical(cpu->sregs[X86_CS], cpu->ip);
+    const uint8_t value = x86_read_byte(cpu, address);
     cpu->ip = (uint16_t)(cpu->ip + 1u);
     return value;
 }
@@ -989,12 +993,12 @@ int x86_step(X86Cpu* cpu) {
     switch (opcode) {
         /* PUSH/POP сегментных регистров */
         case 0x06: x86_push(cpu, cpu->sregs[X86_ES]); break;
-        case 0x07: cpu->sregs[X86_ES] = x86_pop(cpu); break;
+        case 0x07: x86_load_segment(cpu, X86_ES, x86_pop(cpu)); break;
         case 0x0E: x86_push(cpu, cpu->sregs[X86_CS]); break;
         case 0x16: x86_push(cpu, cpu->sregs[X86_SS]); break;
-        case 0x17: cpu->sregs[X86_SS] = x86_pop(cpu); break;
+        case 0x17: x86_load_segment(cpu, X86_SS, x86_pop(cpu)); cpu->mov_ss_shadow = 1; break;
         case 0x1E: x86_push(cpu, cpu->sregs[X86_DS]); break;
-        case 0x1F: cpu->sregs[X86_DS] = x86_pop(cpu); break;
+        case 0x1F: x86_load_segment(cpu, X86_DS, x86_pop(cpu)); break;
 
         /* ASCII-коррекции */
         case 0x27: case 0x2F: case 0x37: case 0x3F: {
@@ -1223,7 +1227,7 @@ int x86_step(X86Cpu* cpu) {
             x86_push(cpu, cpu->sregs[X86_CS]);
             x86_push(cpu, cpu->ip);
             cpu->ip = new_ip;
-            cpu->sregs[X86_CS] = new_cs;
+            x86_load_segment(cpu, X86_CS, new_cs);
             break;
         }
         case 0x9B: break; /* WAIT */
@@ -1304,7 +1308,7 @@ int x86_step(X86Cpu* cpu) {
             cpu->regs[modrm.reg] = x86_read_word(cpu, x86_physical(modrm.segment, modrm.offset));
             const uint16_t segment_value = x86_read_word(
                 cpu, x86_physical(modrm.segment, (uint16_t)(modrm.offset + 2u)));
-            cpu->sregs[opcode == 0xC4 ? X86_ES : X86_DS] = segment_value;
+            x86_load_segment(cpu, opcode == 0xC4 ? X86_ES : X86_DS, segment_value);
             break;
         }
         case 0xC6: case 0xC7: {
@@ -1336,13 +1340,13 @@ int x86_step(X86Cpu* cpu) {
         case 0xCA: {
             const uint16_t cleanup = fetch16(cpu);
             cpu->ip = x86_pop(cpu);
-            cpu->sregs[X86_CS] = x86_pop(cpu);
+            x86_load_segment(cpu, X86_CS, x86_pop(cpu));
             cpu->regs[X86_SP] = (uint16_t)(cpu->regs[X86_SP] + cleanup);
             break;
         }
         case 0xCB:
             cpu->ip = x86_pop(cpu);
-            cpu->sregs[X86_CS] = x86_pop(cpu);
+            x86_load_segment(cpu, X86_CS, x86_pop(cpu));
             break;
         case 0xCC: x86_raise_interrupt(cpu, 3); break;
         case 0xCD: x86_raise_interrupt(cpu, fetch8(cpu)); break;
@@ -1353,7 +1357,7 @@ int x86_step(X86Cpu* cpu) {
             break;
         case 0xCF:
             cpu->ip = x86_pop(cpu);
-            cpu->sregs[X86_CS] = x86_pop(cpu);
+            x86_load_segment(cpu, X86_CS, x86_pop(cpu));
             cpu->flags = (cpu->flags & 0xffff0000u) | x86_pop(cpu) | 0x0002u;
             break;
 
@@ -1439,7 +1443,7 @@ int x86_step(X86Cpu* cpu) {
             const uint16_t new_ip = fetch16(cpu);
             const uint16_t new_cs = fetch16(cpu);
             cpu->ip = new_ip;
-            cpu->sregs[X86_CS] = new_cs;
+            x86_load_segment(cpu, X86_CS, new_cs);
             break;
         }
         case 0xEB: {
@@ -1564,14 +1568,14 @@ int x86_step(X86Cpu* cpu) {
                     x86_push(cpu, cpu->sregs[X86_CS]);
                     x86_push(cpu, cpu->ip);
                     cpu->ip = new_ip;
-                    cpu->sregs[X86_CS] = new_cs;
+                    x86_load_segment(cpu, X86_CS, new_cs);
                     break;
                 }
                 case 4: cpu->ip = value; break;
                 case 5: {
                     const uint32_t address = x86_physical(modrm.segment, modrm.offset);
                     cpu->ip = x86_read_word(cpu, address);
-                    cpu->sregs[X86_CS] = x86_read_word(cpu, address + 2u);
+                    x86_load_segment(cpu, X86_CS, x86_read_word(cpu, address + 2u));
                     break;
                 }
                 default: x86_push(cpu, value); break;
