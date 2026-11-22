@@ -1,0 +1,39 @@
+# Manual, bounded compatibility probe; not a claim that Dimbuntu boots.
+name: Диагностика Dimbuntu
+on:
+  push:
+    branches: [ 'arena/**' ]
+    paths: [ '.github/workflows/diagnose-dimbuntu.yml' ]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: openxiso
+      - uses: actions/checkout@v5
+        with:
+          repository: ehekufa/Dimbuntu
+          ref: c186bf197e37b620de7f96fe760b7d78ede49f63
+          path: dimbuntu
+      - name: Install ISO build tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xorriso libarchive-tools syslinux-common
+      - name: Rebuild Dimbuntu from the pinned source
+        run: bash dimbuntu/scripts/build.sh
+      - name: Run bounded OpenXiso probe
+        run: |
+          set -eo pipefail
+          make -C openxiso/app/src/main/cpp/tests linux_probe
+          sha256sum dimbuntu/build/dimbuntu-tiny.iso > probe.log
+          openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log
+          {
+            echo '### Dimbuntu probe (not a boot success test)'
+            echo '```'
+            cat probe.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 -c 'from pathlib import Path; s=Path("probe.log").read_text(); print("::notice::" + s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))'
