@@ -4,13 +4,15 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 typedef struct Trace {
     uint64_t n, ip;
-    uint16_t cs, ax, bx, cx, dx, si, di, ds, es, ss, sp;
+    uint16_t cs, ds, es, ss;
+    uint32_t ax, bx, cx, dx, si, di, sp;
     uint32_t flags, cr0;
     uint8_t bytes[6];
 } Trace;
@@ -20,10 +22,15 @@ static Trace capture(PcMachine *m) {
     Trace t = {0};
     t.n = c->instructions; t.cs = c->sregs[X86_CS];
     t.ip = c->mode == X86_MODE_16 ? c->ip : c->rip;
-    t.ax = c->regs[X86_AX]; t.bx = c->regs[X86_BX]; t.cx = c->regs[X86_CX];
-    t.dx = c->regs[X86_DX]; t.si = c->regs[X86_SI]; t.di = c->regs[X86_DI];
+    t.ax = c->mode == X86_MODE_16 ? c->regs[X86_AX] : (uint32_t)c->gpr[X86_RAX];
+    t.bx = c->mode == X86_MODE_16 ? c->regs[X86_BX] : (uint32_t)c->gpr[X86_RBX];
+    t.cx = c->mode == X86_MODE_16 ? c->regs[X86_CX] : (uint32_t)c->gpr[X86_RCX];
+    t.dx = c->mode == X86_MODE_16 ? c->regs[X86_DX] : (uint32_t)c->gpr[X86_RDX];
+    t.si = c->mode == X86_MODE_16 ? c->regs[X86_SI] : (uint32_t)c->gpr[X86_RSI];
+    t.di = c->mode == X86_MODE_16 ? c->regs[X86_DI] : (uint32_t)c->gpr[X86_RDI];
     t.ds = c->sregs[X86_DS]; t.es = c->sregs[X86_ES]; t.ss = c->sregs[X86_SS];
-    t.sp = c->regs[X86_SP]; t.flags = c->flags; t.cr0 = c->cr0;
+    t.sp = c->mode == X86_MODE_16 ? c->regs[X86_SP] : (uint32_t)c->gpr[X86_RSP];
+    t.flags = c->flags; t.cr0 = c->cr0;
     for (unsigned i = 0; i < sizeof(t.bytes); i++) {
         if (!(c->cr0 & X86_CR0_PG)) {
             uint64_t addr = (c->cr0 & X86_CR0_PE) ? c->seg_base[X86_CS] + t.ip + i :
@@ -50,7 +57,7 @@ static void timeout_handler(int signal_number) {
 }
 static void format_trace(char *buf, size_t size, const Trace *t) {
     snprintf(buf, size, "%" PRIu64 " %04x:%04" PRIx64 " %02x %02x %02x %02x %02x %02x "
-           "AX=%04x BX=%04x CX=%04x DX=%04x SI=%04x DI=%04x DS=%04x ES=%04x SS:SP=%04x:%04x FL=%04x CR0=%08x\n",
+           "AX=%08x BX=%08x CX=%08x DX=%08x SI=%08x DI=%08x DS=%04x ES=%04x SS:SP=%04x:%08x FL=%04x CR0=%08x\n",
            t->n, t->cs, t->ip, t->bytes[0], t->bytes[1], t->bytes[2],
            t->bytes[3], t->bytes[4], t->bytes[5], t->ax, t->bx, t->cx, t->dx,
            t->si, t->di, t->ds, t->es, t->ss, t->sp, t->flags, t->cr0);
@@ -69,12 +76,20 @@ int main(int argc, char **argv) {
     }
     Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0; int follow = 0;
     unsigned disk_reports = 0, cr0_reports = 0, firmware_reports = 0; int ud_reported = 0;
+    const char *trace_ip = getenv("OPENXISO_TRACE_IP");
+    uint64_t watch_ip = trace_ip ? strtoull(trace_ip, NULL, 0) : UINT64_MAX;
+    int watch_reported = 0;
     signal(SIGALRM, timeout_handler);
     alarm(20);
     for (unsigned i = 0; i < 20000000; i++) {
         Trace t = capture(m); ring[count % 48] = t;
         format_trace(last_lines[count % 48], sizeof(last_lines[0]), &t);
         ++count; last_count = (sig_atomic_t)count;
+        if (!watch_reported && t.ip == watch_ip) {
+            watch_reported = 1; puts("First watched instruction:");
+            unsigned first = count > 32 ? count - 32 : 0;
+            for (unsigned j = first; j < count; j++) print_trace(&ring[j % 48]);
+        }
         if (follow > 0) { printf("Transition: "); print_trace(&t); --follow; }
         if (t.cs == 0xf000 && t.ip >= 0x1000 && t.ip < 0x2000 &&
             ((t.ip - 0x1000) % 16 == 0) && firmware_reports++ < 15) {

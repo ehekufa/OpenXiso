@@ -29,11 +29,11 @@ jobs:
           set -eo pipefail
           make -C openxiso/app/src/main/cpp/tests linux_probe
           sha256sum dimbuntu/build/dimbuntu-tiny.iso > probe.log
-          timeout -k 3s 180s env OPENXISO_PROBE_SLICES=20000 OPENXISO_PROBE_PROGRESS=1 stdbuf -oL openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log || echo 'Probe time limit reached' | tee -a probe.log
+          timeout -k 3s 180s env OPENXISO_PROBE_SLICES=2000 OPENXISO_PROBE_PROGRESS=1 stdbuf -oL openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log || echo 'Probe time limit reached' | tee -a probe.log
           cc -std=c11 -O2 -Iopenxiso/app/src/main/cpp/include \
             openxiso/app/src/main/cpp/{openxiso_core.c,x86_cpu.c,x86_wide.c,boot_image.c,legacy_bios.c,pc_machine.c,devices.c} \
             openxiso/app/src/main/cpp/tests/trace_boot.c -o /tmp/trace_boot
-          timeout -k 3s 30s stdbuf -oL /tmp/trace_boot dimbuntu/build/dimbuntu-tiny.iso >> probe.log || echo 'Trace time limit reached' >> probe.log
+          timeout -k 3s 30s env OPENXISO_TRACE_IP=0x10281f stdbuf -oL /tmp/trace_boot dimbuntu/build/dimbuntu-tiny.iso >> probe.log || echo 'Trace time limit reached' >> probe.log
           {
             echo '### Dimbuntu probe (not a boot success test)'
             echo '```'
