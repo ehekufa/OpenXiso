@@ -208,6 +208,20 @@ static void test_rep_string_count(PcMachine* m) {
     CHECK(m->memory[0x3400] == 0x5a);
 }
 
+static void test_wide_byte_inc_dec(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_32; c->cr0 = X86_CR0_PE;
+    c->seg_base[X86_CS] = 0; c->rip = 0x500; c->gpr[X86_RCX] = 1; c->flags |= X86_CF;
+    const uint8_t code[] = {0xfe,0xc9,0xfe,0xc1}; /* DEC CL; INC CL */
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 0 && (c->flags & X86_ZF) && (c->flags & X86_CF));
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 1 && !(c->flags & X86_ZF) && (c->flags & X86_CF));
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -428,6 +442,7 @@ int main(void) {
     test_imul_immediate(m);
     test_firmware_far_call(m);
     test_rep_string_count(m);
+    test_wide_byte_inc_dec(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

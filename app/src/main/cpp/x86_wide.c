@@ -1557,6 +1557,19 @@ int x86_wide_step(X86Cpu* cpu) {
                 load_descriptor(cpu, selector, offset, opcode);
                 break;
             }
+            case 0xFE: { /* INC/DEC r/m8, preserving CF */
+                const WideModRM modrm = decode_modrm(cpu, address_width, segment,
+                                                     rex_r, rex_x, rex_b, rex_w, rex_present);
+                if (modrm.reg > 1) {
+                    cpu->rip = start_rip; wide_exception(cpu, 6, 0); break;
+                }
+                const int saved_cf = flag(cpu, X86_CF);
+                const uint64_t value = read_rm(cpu, &modrm, 8, rex_present);
+                const uint64_t result = wide_alu(cpu, modrm.reg ? 5 : 0, value, 1, 8);
+                write_rm(cpu, &modrm, 8, rex_present, result);
+                set_flag(cpu, X86_CF, saved_cf);
+                break;
+            }
             case 0xFF: {
                 const WideModRM modrm = decode_modrm(cpu, address_width, segment,
                                                      rex_r, rex_x, rex_b, rex_w,
