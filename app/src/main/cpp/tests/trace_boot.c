@@ -7,8 +7,8 @@
 #include <unistd.h>
 
 typedef struct Trace {
-    uint64_t n;
-    uint16_t cs, ip, ax, bx, cx, dx, si, di, ds, es, ss, sp;
+    uint64_t n, ip;
+    uint16_t cs, ax, bx, cx, dx, si, di, ds, es, ss, sp;
     uint32_t flags, cr0;
     uint8_t bytes[6];
 } Trace;
@@ -16,17 +16,23 @@ typedef struct Trace {
 static Trace capture(PcMachine *m) {
     X86Cpu *c = &m->cpu;
     Trace t = {0};
-    t.n = c->instructions; t.cs = c->sregs[X86_CS]; t.ip = c->ip;
+    t.n = c->instructions; t.cs = c->sregs[X86_CS];
+    t.ip = c->mode == X86_MODE_16 ? c->ip : c->rip;
     t.ax = c->regs[X86_AX]; t.bx = c->regs[X86_BX]; t.cx = c->regs[X86_CX];
     t.dx = c->regs[X86_DX]; t.si = c->regs[X86_SI]; t.di = c->regs[X86_DI];
     t.ds = c->sregs[X86_DS]; t.es = c->sregs[X86_ES]; t.ss = c->sregs[X86_SS];
     t.sp = c->regs[X86_SP]; t.flags = c->flags; t.cr0 = c->cr0;
-    for (unsigned i = 0; i < sizeof(t.bytes); i++)
-        t.bytes[i] = x86_read_byte(c, x86_physical_a20(c, t.cs, (uint16_t)(t.ip + i)));
+    for (unsigned i = 0; i < sizeof(t.bytes); i++) {
+        if (!(c->cr0 & X86_CR0_PG)) {
+            uint64_t addr = (c->cr0 & X86_CR0_PE) ? c->seg_base[X86_CS] + t.ip + i :
+                            x86_physical_a20(c, t.cs, (uint16_t)(t.ip + i));
+            t.bytes[i] = (uint8_t)x86_read_physical(c, addr, 8);
+        }
+    }
     return t;
 }
 static void print_trace(const Trace *t) {
-    printf("%" PRIu64 " %04x:%04x %02x %02x %02x %02x %02x %02x "
+    printf("%" PRIu64 " %04x:%04" PRIx64 " %02x %02x %02x %02x %02x %02x "
            "AX=%04x BX=%04x CX=%04x DX=%04x SI=%04x DI=%04x DS=%04x ES=%04x SS:SP=%04x:%04x FL=%04x CR0=%08x\n",
            t->n, t->cs, t->ip, t->bytes[0], t->bytes[1], t->bytes[2],
            t->bytes[3], t->bytes[4], t->bytes[5], t->ax, t->bx, t->cx, t->dx,

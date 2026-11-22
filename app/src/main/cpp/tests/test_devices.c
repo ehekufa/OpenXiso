@@ -67,6 +67,27 @@ static void test_eltorito_load_segment(PcMachine* m) {
     fclose(f);
 }
 
+static void test_unprefixed_protected_far_jump(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->sregs[X86_CS] = c->sregs[X86_DS] = c->sregs[X86_SS] = 0;
+    c->ip = 0x500; c->regs[X86_SP] = 0x800;
+    c->gdtr_base = 0x1000; c->gdtr_limit = 0x0f;
+    const uint8_t descriptor[] = {0xff,0xff,0,0,0,0x9a,0xcf,0};
+    memcpy(m->memory + 0x1008, descriptor, sizeof(descriptor));
+    const uint8_t code[] = {0x66,0xb8,1,0,0,0, 0x0f,0x22,0xc0,
+                            0xea,0x50,0x06,0x08,0x00};
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    m->memory[0x650] = 0xf4;
+    CHECK(x86_step(c)); CHECK(x86_step(c));
+    CHECK((c->cr0 & X86_CR0_PE) && c->mode == X86_MODE_16);
+    CHECK(x86_step(c));
+    CHECK(!c->fault && !c->triple_fault && c->mode == X86_MODE_32);
+    CHECK(c->seg_sel[X86_CS] == 8 && c->rip == 0x650 && c->seg_base[X86_CS] == 0);
+    CHECK(!x86_step(c) && c->halted);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -280,6 +301,7 @@ int main(void) {
     }
     test_eltorito_status(m);
     test_eltorito_load_segment(m);
+    test_unprefixed_protected_far_jump(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

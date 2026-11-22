@@ -560,7 +560,7 @@ static void apply_cr0(X86Cpu* cpu) {
 
 /* The 16-bit interpreter and wide interpreter have separate register views. */
 static void wide_exception(X86Cpu* cpu, uint8_t vector, uint32_t error) {
-    if (cpu->mode == X86_MODE_16) {
+    if (!(cpu->cr0 & X86_CR0_PE)) {
         cpu->ip = (uint16_t)cpu->rip;
         x86_wide_sync_to_real(cpu);
         x86_deliver_exception(cpu, vector, error);
@@ -1139,10 +1139,12 @@ int x86_wide_step(X86Cpu* cpu) {
     wide_initialize(cpu);
     if (cpu->mode == X86_MODE_16) {
         cpu->rip = (uint64_t)cpu->ip;
-        for (int index = 0; index < 6; ++index) {
-            cpu->seg_sel[index] = cpu->sregs[index];
-            cpu->seg_base[index] = (uint64_t)cpu->sregs[index] * 16u;
-            cpu->seg_limit[index] = 0xFFFFu;
+        if (!(cpu->cr0 & X86_CR0_PE)) {
+            for (int index = 0; index < 6; ++index) {
+                cpu->seg_sel[index] = cpu->sregs[index];
+                cpu->seg_base[index] = (uint64_t)cpu->sregs[index] * 16u;
+                cpu->seg_limit[index] = 0xFFFFu;
+            }
         }
     }
     cpu->instructions += 1u;
@@ -1686,7 +1688,7 @@ int x86_wide_step(X86Cpu* cpu) {
             case 0xCC: x86_deliver_interrupt(cpu,3,0,0); break;
             case 0xCD: {
                 const uint8_t vector = fetch8(cpu);
-                if (cpu->mode==X86_MODE_16) {
+                if (!(cpu->cr0 & X86_CR0_PE)) {
                     x86_wide_sync_to_real(cpu);
                     if (cpu->interrupt_hook && cpu->interrupt_hook(cpu->context, vector)) {
                         x86_wide_sync_from_real(cpu);

@@ -346,7 +346,7 @@ void x86_write_msr(X86Cpu* cpu, uint32_t msr, uint64_t value) {
 void x86_deliver_interrupt(X86Cpu* cpu, uint8_t vector, uint32_t error_code, int has_error) {
     if (cpu->in_interrupt) return;
     cpu->in_interrupt = 1;
-    if (cpu->mode == X86_MODE_16) {
+    if (!(cpu->cr0 & X86_CR0_PE)) {
         /* Firmware-хук для BIOS-векторов в реальном режиме */
         if (cpu->interrupt_hook && cpu->interrupt_hook(cpu->context, vector)) {
             cpu->in_interrupt = 0;
@@ -421,7 +421,7 @@ void x86_deliver_interrupt(X86Cpu* cpu, uint8_t vector, uint32_t error_code, int
 void x86_deliver_exception(X86Cpu* cpu, uint8_t vector, uint32_t error_code) {
     int has_error = (vector == 8 || vector == 10 || vector == 11 || vector == 12 || vector == 13 || vector == 14 || vector == 17 || vector == 21 || vector == 29 || vector == 30);
     /* #PF, #GP, #SS, #NP, #TS, #AC, #VC, #SX */
-    if (cpu->mode == X86_MODE_16) {
+    if (!(cpu->cr0 & X86_CR0_PE)) {
         /* В реальном режиме исключения идут через IVT, но BIOS-хук их не перехватывает кроме INT3/overflow */
         /* Для divide error и т.д. просто через IVT */
         x86_push(cpu, cpu->flags);
@@ -906,7 +906,9 @@ int x86_step(X86Cpu* cpu) {
         return 1;
     }
     cpu->tsc += 3;
-    if (cpu->mode != X86_MODE_16) {
+    /* PE may already be set while CS still has a 16-bit default size.
+     * The following far jump must load a protected-mode descriptor. */
+    if (cpu->mode != X86_MODE_16 || (cpu->cr0 & X86_CR0_PE)) {
         return x86_wide_step(cpu);
     }
 
