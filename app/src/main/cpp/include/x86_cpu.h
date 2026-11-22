@@ -158,6 +158,9 @@ struct X86Cpu {
     uint64_t tr_base;
     uint32_t tr_limit;
     uint16_t tr_sel;
+    uint64_t ldtr_base;
+    uint32_t ldtr_limit;
+    uint16_t ldtr_sel;
     uint64_t msr_star;
     uint64_t msr_lstar;
     uint64_t msr_fmask;

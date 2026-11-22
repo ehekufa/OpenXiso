@@ -254,11 +254,8 @@ int x86_load_segment(X86Cpu* cpu, int seg_index, uint16_t selector) {
     uint32_t limit_raw;
     uint8_t access, flags;
     if (ti) {
-        if (cpu->tr_base == 0) return -1;
-        base = cpu->tr_base;
-        limit_raw = (uint16_t)cpu->tr_limit;
-        /* LDT: read descriptor from LDT base - simplified: use GDT base + tr? */
-        /* For simplicity, treat LDT as in memory at tr_base */
+        if (!(cpu->ldtr_sel & 0xfff8u) || (uint32_t)index * 8u + 7u > cpu->ldtr_limit) return -1;
+        base = cpu->ldtr_base;
         uint64_t entry = base + (uint64_t)index * 8u;
         uint8_t d[8];
         for (int i = 0; i < 8; i++) d[i] = (uint8_t)phys_read_raw(cpu, entry + i, 8);
@@ -274,7 +271,6 @@ int x86_load_segment(X86Cpu* cpu, int seg_index, uint16_t selector) {
         cpu->sregs[seg_index] = selector;
         return 0;
     } else {
-        if (cpu->gdtr_base == 0) return -1;
         if ((uint32_t)index * 8u + 7u > cpu->gdtr_limit) return -1;
         uint64_t entry = cpu->gdtr_base + (uint64_t)index * 8u;
         uint8_t d[8];

@@ -631,6 +631,57 @@ static void wide_0f(X86Cpu* cpu, uint8_t subopcode, int width, int address_width
     }
 
     switch (subopcode) {
+        case 0x00: { /* SLDT, STR, LLDT, LTR */
+            const WideModRM modrm = decode_modrm(cpu, address_width, segment,
+                                                 rex_r, rex_x, rex_b, rex_w, rex_present);
+            if (!(cpu->cr0 & X86_CR0_PE) || modrm.reg > 3) {
+                cpu->rip = cpu->instr_start_rip; wide_exception(cpu, 6, 0); return;
+            }
+            if (modrm.reg <= 1) {
+                uint16_t selector = modrm.reg ? cpu->tr_sel : cpu->ldtr_sel;
+                write_rm(cpu, &modrm, modrm.is_register ? width : 16, rex_present, selector);
+                return;
+            }
+            uint16_t selector = (uint16_t)read_rm(cpu, &modrm, 16, rex_present);
+            if (cpu->pf_pending) return;
+            if (cpu->cpl != 0) {
+                cpu->rip = cpu->instr_start_rip; wide_exception(cpu, 13, 0); return;
+            }
+            if (modrm.reg == 2 && (selector & 0xfffcu) == 0) {
+                cpu->ldtr_sel = 0; cpu->ldtr_base = 0; cpu->ldtr_limit = 0;
+                return;
+            }
+            const uint32_t index = selector & 0xfff8u;
+            const unsigned descriptor_size = (cpu->efer & X86_EFER_LMA) ? 16 : 8;
+            if ((selector & 4u) || !index || index + descriptor_size - 1 > cpu->gdtr_limit) {
+                cpu->rip = cpu->instr_start_rip; wide_exception(cpu, 13, selector & 0xfffcu); return;
+            }
+            const uint64_t entry = cpu->gdtr_base + index;
+            const uint64_t d = read_mem(cpu, entry, 64);
+            uint64_t high = descriptor_size == 16 ? read_mem(cpu, entry + 8, 64) : 0;
+            if (cpu->pf_pending) return;
+            const uint8_t access = (uint8_t)(d >> 40);
+            const uint8_t type = access & 0x0fu;
+            if ((access & 0x10u) || (modrm.reg == 2 ? type != 2 : (type != 1 && type != 9)) ||
+                (descriptor_size == 16 && ((high >> 32) != 0 || (modrm.reg == 3 && type != 9)))) {
+                cpu->rip = cpu->instr_start_rip; wide_exception(cpu, 13, selector & 0xfffcu); return;
+            }
+            if (!(access & 0x80u)) {
+                cpu->rip = cpu->instr_start_rip; wide_exception(cpu, 11, selector & 0xfffcu); return;
+            }
+            uint64_t base = ((d >> 16) & 0xffffffu) | ((d >> 32) & 0xff000000u);
+            if (descriptor_size == 16) base |= (high & 0xffffffffu) << 32;
+            uint32_t limit = (uint32_t)((d & 0xffffu) | ((d >> 32) & 0xf0000u));
+            if (d & (UINT64_C(1) << 55)) limit = (limit << 12) | 0xfffu;
+            if (modrm.reg == 2) {
+                cpu->ldtr_sel = selector; cpu->ldtr_base = base; cpu->ldtr_limit = limit;
+            } else {
+                write_mem(cpu, entry + 5, 8, access | 2u); /* TSS becomes busy */
+                if (cpu->pf_pending) return;
+                cpu->tr_sel = selector; cpu->tr_base = base; cpu->tr_limit = limit;
+            }
+            return;
+        }
         case 0x01: {                     /* LGDT / LIDT / SGDT / SIDT */
             const WideModRM modrm = decode_modrm(cpu, address_width, segment,
                                                  rex_r, rex_x, rex_b, rex_w,

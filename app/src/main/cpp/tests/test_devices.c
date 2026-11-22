@@ -130,6 +130,29 @@ static void test_address32_indirect_far_call(PcMachine* m) {
     CHECK(x86_step(c) && c->halted);
 }
 
+static void test_ldtr_and_tr(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_32; c->cr0 = X86_CR0_PE;
+    c->gdtr_base = 0x1000; c->gdtr_limit = 0x2f; c->seg_base[X86_CS] = 0;
+    c->seg_limit[X86_CS] = 0xffffffffu; c->rip = 0x500;
+    /* TSS at 0x234500, limit 0x67; available 32-bit TSS, present. */
+    const uint8_t tss[] = {0x67,0,0x00,0x45,0x23,0x89,0,0};
+    memcpy(m->memory + 0x1028, tss, sizeof(tss));
+    const uint8_t code[] = {0x31,0xc0, 0x0f,0x00,0xd0, /* LLDT AX=0 */
+                            0x66,0xb8,0x28,0x00, 0x0f,0x00,0xd8, /* LTR AX */
+                            0x0f,0x00,0xc9}; /* STR CX */
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    c->ldtr_sel = 0x18; c->ldtr_base = 0x1234; c->ldtr_limit = 0x100;
+    CHECK(x86_step(c)); CHECK(x86_step(c));
+    CHECK(c->ldtr_sel == 0 && c->ldtr_base == 0 && c->ldtr_limit == 0);
+    CHECK(x86_step(c)); CHECK(x86_step(c));
+    CHECK(c->tr_sel == 0x28 && c->tr_base == 0x234500 && c->tr_limit == 0x67);
+    CHECK(m->memory[0x102d] == 0x8b);
+    CHECK(x86_step(c)); CHECK((c->gpr[X86_RCX] & 0xffffu) == 0x28);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -346,6 +369,7 @@ int main(void) {
     test_unprefixed_protected_far_jump(m);
     test_return_to_real_cs_cache(m);
     test_address32_indirect_far_call(m);
+    test_ldtr_and_tr(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);
