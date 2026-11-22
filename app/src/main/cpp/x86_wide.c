@@ -1524,6 +1524,13 @@ int x86_wide_step(X86Cpu* cpu) {
                 write_rm(cpu, &modrm, operation_width, rex_present, immediate);
                 break;
             }
+            case 0xC9: {                 /* LEAVE: SP <- BP; POP BP */
+                const int stack_width = cpu->mode == X86_MODE_64 ? 64 :
+                                        cpu->mode == X86_MODE_16 ? 16 : 32;
+                set_gpr(cpu, X86_RSP, stack_width, get_gpr(cpu, X86_RBP, stack_width));
+                set_gpr(cpu, X86_RBP, width, wide_pop(cpu, width));
+                break;
+            }
             case 0xC3:                   /* RET */
                 cpu->rip = wide_pop(cpu, width);
                 break;

@@ -222,6 +222,18 @@ static void test_wide_byte_inc_dec(PcMachine* m) {
     CHECK(c->gpr[X86_RCX] == 1 && !(c->flags & X86_ZF) && (c->flags & X86_CF));
 }
 
+static void test_wide_leave(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_32; c->cr0 = X86_CR0_PE;
+    c->seg_base[X86_CS] = c->seg_base[X86_SS] = 0; c->rip = 0x500;
+    c->gpr[X86_RBP] = 0x10000; c->gpr[X86_RSP] = 0x9000;
+    m->memory[0x500] = 0xc9; x86_write_physical(c, 0x10000, 32, 0x87654321);
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RSP] == 0x10004 && c->gpr[X86_RBP] == 0x87654321);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -443,6 +455,7 @@ int main(void) {
     test_firmware_far_call(m);
     test_rep_string_count(m);
     test_wide_byte_inc_dec(m);
+    test_wide_leave(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);
