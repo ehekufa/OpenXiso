@@ -49,6 +49,11 @@ int main(int argc, char **argv) {
         if (disk) { printf("BIOS before: "); print_trace(&t); }
         int running = openxiso_machine_run_slice(m, 1);
         if (disk) { Trace after = capture(m); printf("BIOS after:  "); print_trace(&after); }
+        if (m->cpu.instructions > 5000 && m->cpu.sregs[X86_CS] == 0 && m->cpu.ip == 0x7c00) {
+            puts("Jump back to boot sector:");
+            unsigned first = count > 24 ? count - 24 : 0;
+            for (unsigned j = first; j < count; j++) print_trace(&ring[j % 48]);
+        }
         if (!running) break;
     }
     printf("Last instructions:\n");

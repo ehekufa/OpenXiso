@@ -40,4 +40,4 @@ jobs:
             cat probe.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          python3 -c 'from pathlib import Path; s=Path("probe.log").read_text(); print("::notice::" + s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A"))'
+          python3 -c 'from pathlib import Path; s=Path("probe.log").read_text(); parts=[s[i:i+2500] for i in range(0,len(s),2500)]; [print("::notice title=Trace part " + str(i+1) + "::" + p.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")) for i,p in enumerate(parts)]'
