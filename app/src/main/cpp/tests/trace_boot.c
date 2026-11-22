@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
         ++count; last_count = (sig_atomic_t)count;
         if (!watch_reported && t.ip == watch_ip) {
             watch_reported = 1; puts("First watched instruction:");
-            unsigned first = count > 32 ? count - 32 : 0;
+            unsigned first = count > 48 ? count - 48 : 0;
             for (unsigned j = first; j < count; j++) print_trace(&ring[j % 48]);
         }
         if (follow > 0) { printf("Transition: "); print_trace(&t); --follow; }
