@@ -187,6 +187,27 @@ static void test_firmware_far_call(PcMachine* m) {
     CHECK(!(m->cpu.flags & X86_CF) && m->cpu.regs[X86_SP] == 0x800);
 }
 
+static void test_rep_string_count(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->wide_ready = 1; c->mode = X86_MODE_32; c->cr0 = X86_CR0_PE;
+    c->seg_base[X86_CS] = c->seg_base[X86_DS] = c->seg_base[X86_ES] = 0;
+    c->rip = 0x500; c->gpr[X86_RDI] = 0x1000; c->gpr[X86_RCX] = 0xffffffffu;
+    memcpy(m->memory + 0x1000, "Hello, world!!", 15);
+    m->memory[0x500] = 0xf2; m->memory[0x501] = 0xae; /* REPNE SCASB */
+    CHECK(x86_step(c));
+    CHECK(c->gpr[X86_RCX] == 0xfffffff0u && c->gpr[X86_RDI] == 0x100f);
+    CHECK((c->flags & X86_ZF) && c->rip == 0x502);
+    /* Long repetitions are interruptible at a bounded iteration boundary. */
+    m->memory[0x502] = 0xf3; m->memory[0x503] = 0xa4;
+    c->gpr[X86_RSI] = 0x2000; c->gpr[X86_RDI] = 0x3000; c->gpr[X86_RCX] = 1025;
+    memset(m->memory + 0x2000, 0x5a, 1025);
+    CHECK(x86_step(c)); CHECK(c->rip == 0x502 && c->gpr[X86_RCX] == 1);
+    CHECK(x86_step(c)); CHECK(c->rip == 0x504 && c->gpr[X86_RCX] == 0);
+    CHECK(m->memory[0x3400] == 0x5a);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -406,6 +427,7 @@ int main(void) {
     test_ldtr_and_tr(m);
     test_imul_immediate(m);
     test_firmware_far_call(m);
+    test_rep_string_count(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

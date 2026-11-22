@@ -1659,7 +1659,9 @@ int x86_wide_step(X86Cpu* cpu) {
                 int bytes = w/8;
                 int step = flag(cpu,X86_DF) ? -bytes : bytes;
                 uint64_t count = repetition ? get_gpr(cpu,X86_RCX,address_width) : 1;
-                for (uint64_t iter=0; iter<count; iter++) {
+                int continue_rep = repetition && count != 0;
+                /* Bound each slice, preserving restartability and remaining count. */
+                for (unsigned iter = 0; count && iter < 1024; ++iter) {
                     uint64_t si = get_gpr(cpu,X86_RSI,address_width);
                     uint64_t di = get_gpr(cpu,X86_RDI,address_width);
                     uint64_t src_addr = linearize(cpu, si, segment);
@@ -1669,26 +1671,20 @@ int x86_wide_step(X86Cpu* cpu) {
                     else if (opcode==0xAA||opcode==0xAB) { uint64_t v = w==8?get_reg8(cpu,0,rex_present):get_gpr(cpu,X86_RAX,w); write_mem(cpu,dst_addr,w,v); }
                     else if (opcode==0xAC||opcode==0xAD) { uint64_t v=read_mem(cpu,src_addr,w); if(w==8) set_reg8(cpu,0,rex_present,(uint8_t)v); else set_gpr(cpu,X86_RAX,w,v); }
                     else { uint64_t a = w==8?get_reg8(cpu,0,rex_present):get_gpr(cpu,X86_RAX,w); uint64_t b=read_mem(cpu,dst_addr,w); wide_alu(cpu,7,a,b,w); }
+                    if (cpu->pf_pending) break;
                     if (opcode!=0xAA && opcode!=0xAB && opcode!=0xAE && opcode!=0xAF) set_gpr(cpu,X86_RSI,address_width, si+step);
                     if (opcode!=0xAC && opcode!=0xAD) set_gpr(cpu,X86_RDI,address_width, di+step);
-                    if (cpu->pf_pending) break;
+                    --count;
+                    if (repetition) set_gpr(cpu,X86_RCX,address_width,count);
                     if (repetition && (opcode==0xA6||opcode==0xA7||opcode==0xAE||opcode==0xAF)) {
                         int zf = flag(cpu,X86_ZF);
-                        if ((repetition>0 && !zf) || (repetition<0 && zf)) break;
+                        if ((repetition>0 && !zf) || (repetition<0 && zf)) {
+                            continue_rep = 0;
+                            break;
+                        }
                     }
                 }
-                if (repetition) {
-                    uint64_t done_count = count;
-                    /* CX already decremented by loop count - simplified: set CX=0 for REP MOVS/STOS, for CMPS/SCAS need remaining */
-                    if (opcode==0xA6||opcode==0xA7||opcode==0xAE||opcode==0xAF) {
-                        /* approximate: CX = original - iterations done */
-                        /* we lost iterations, set to 0 if ZF condition met else keep? For boot, set 0 */
-                        set_gpr(cpu,X86_RCX,address_width,0);
-                    } else {
-                        set_gpr(cpu,X86_RCX,address_width,0);
-                    }
-                    (void)done_count;
-                }
+                if (continue_rep && count && !cpu->pf_pending) cpu->rip = start_rip;
                 break; }
             case 0xC0: case 0xC1: case 0xD0: case 0xD1: case 0xD2: case 0xD3: {
                 const WideModRM modrm = decode_modrm(cpu, address_width, segment, rex_r, rex_x, rex_b, rex_w, rex_present);
