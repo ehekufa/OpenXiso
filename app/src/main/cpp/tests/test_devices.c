@@ -112,6 +112,24 @@ static void test_return_to_real_cs_cache(PcMachine* m) {
     CHECK(x86_step(c) && c->halted);
 }
 
+static void test_address32_indirect_far_call(PcMachine* m) {
+    X86Cpu* c = &m->cpu;
+    x86_reset(c, m->memory, m->memory_size);
+    x86_set_max_mode(c, X86_MODE_32);
+    c->sregs[X86_CS] = c->sregs[X86_DS] = c->sregs[X86_SS] = 0;
+    c->ip = 0x500; c->regs[X86_SP] = 0x900; c->regs[X86_SI] = 1;
+    const uint8_t code[] = {0x67,0xff,0x1c,0xb5,0x00,0x10,0x00,0x00,0xf4};
+    const uint8_t target[] = {0xb8,0x34,0x12,0xcb};
+    memcpy(m->memory + 0x500, code, sizeof(code));
+    memcpy(m->memory + 0x700, target, sizeof(target));
+    x86_write_word(c, 0x1004, 0x700); x86_write_word(c, 0x1006, 0);
+    CHECK(x86_step(c)); CHECK(c->ip == 0x700 && c->regs[X86_SP] == 0x8fc);
+    CHECK(x86_read_word(c, 0x8fc) == 0x508 && x86_read_word(c, 0x8fe) == 0);
+    CHECK(x86_step(c)); CHECK(c->regs[X86_AX] == 0x1234);
+    CHECK(x86_step(c)); CHECK(c->ip == 0x508 && c->regs[X86_SP] == 0x900);
+    CHECK(x86_step(c) && c->halted);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -327,6 +345,7 @@ int main(void) {
     test_eltorito_load_segment(m);
     test_unprefixed_protected_far_jump(m);
     test_return_to_real_cs_cache(m);
+    test_address32_indirect_far_call(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

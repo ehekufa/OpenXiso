@@ -574,6 +574,12 @@ static void wide_exception(X86Cpu* cpu, uint8_t vector, uint32_t error) {
 
 static void load_descriptor(X86Cpu* cpu, uint16_t selector, uint64_t offset,
                             uint8_t opcode) {
+    if (!(cpu->cr0 & X86_CR0_PE)) {
+        x86_load_segment(cpu, X86_CS, selector);
+        cpu->rip = (uint16_t)offset;
+        cpu->ip = (uint16_t)offset;
+        return;
+    }
     if (x86_load_segment(cpu, X86_CS, selector) != 0) {
         /* #GP */
         cpu->rip = cpu->instr_start_rip;
@@ -1499,6 +1505,20 @@ int x86_wide_step(X86Cpu* cpu) {
                               write_rm(cpu, &modrm, width, rex_present, result);
                               set_flag(cpu, X86_CF, saved != 0); break; }
                     case 2: wide_push(cpu, width, cpu->rip); cpu->rip = value; break;
+                    case 3: case 5: { /* CALL/JMP far m16:16 or m16:32 */
+                        if (modrm.is_register || width == 64) {
+                            cpu->rip = start_rip; wide_exception(cpu, 6, 0); break;
+                        }
+                        const uint64_t address = modrm_address(cpu, &modrm);
+                        const uint16_t selector = (uint16_t)read_mem(cpu, address + width / 8, 16);
+                        if (cpu->pf_pending) break;
+                        if (modrm.reg == 3) {
+                            wide_push(cpu, width, cpu->sregs[X86_CS]);
+                            wide_push(cpu, width, cpu->rip);
+                        }
+                        load_descriptor(cpu, selector, value, opcode);
+                        break;
+                    }
                     case 4: cpu->rip = value; break;
                     case 6: wide_push(cpu, width, value); break;
                     default:
