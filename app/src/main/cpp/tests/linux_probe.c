@@ -30,7 +30,14 @@ int main(int argc, char** argv) {
         close(fd);
         return 2;
     }
-    for (int i = 0; i < 2000 && openxiso_machine_run_slice(machine, 10000); ++i) {}
+    unsigned long slices = 2000;
+    const char* limit = getenv("OPENXISO_PROBE_SLICES");
+    if (limit && *limit) {
+        char* end = NULL;
+        unsigned long requested = strtoul(limit, &end, 10);
+        if (end && !*end && requested > 0 && requested <= 100000) slices = requested;
+    }
+    for (unsigned long i = 0; i < slices && openxiso_machine_run_slice(machine, 10000); ++i) {}
     printf("Статус: %d; инструкций: %" PRIu64 "; режим: %d; CS:IP=%04x:%04x\n",
            machine->status, openxiso_machine_instructions(machine), machine->cpu.mode,
            machine->cpu.sregs[X86_CS], machine->cpu.ip);
