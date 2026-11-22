@@ -30,6 +30,10 @@ jobs:
           make -C openxiso/app/src/main/cpp/tests linux_probe
           sha256sum dimbuntu/build/dimbuntu-tiny.iso > probe.log
           openxiso/app/src/main/cpp/tests/linux_probe dimbuntu/build/dimbuntu-tiny.iso | tee -a probe.log
+          cc -std=c11 -O2 -Iopenxiso/app/src/main/cpp/include \
+            openxiso/app/src/main/cpp/{openxiso_core.c,x86_cpu.c,x86_wide.c,boot_image.c,legacy_bios.c,pc_machine.c,devices.c} \
+            openxiso/app/src/main/cpp/tests/trace_boot.c -o /tmp/trace_boot
+          /tmp/trace_boot dimbuntu/build/dimbuntu-tiny.iso >> probe.log
           {
             echo '### Dimbuntu probe (not a boot success test)'
             echo '```'
