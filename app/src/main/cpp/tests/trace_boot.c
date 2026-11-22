@@ -2,7 +2,9 @@
 #include "pc_machine.h"
 #include <fcntl.h>
 #include <inttypes.h>
+#include <signal.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -31,12 +33,30 @@ static Trace capture(PcMachine *m) {
     }
     return t;
 }
-static void print_trace(const Trace *t) {
-    printf("%" PRIu64 " %04x:%04" PRIx64 " %02x %02x %02x %02x %02x %02x "
+static char last_lines[48][256];
+static volatile sig_atomic_t last_count;
+static void timeout_handler(int signal_number) {
+    (void)signal_number;
+    const char header[] = "\nExecution timed out; most recent instructions:\n";
+    (void)write(STDOUT_FILENO, header, sizeof(header) - 1);
+    unsigned count = (unsigned)last_count;
+    unsigned first = count > 48 ? count - 48 : 0;
+    for (unsigned i = first; i < count; i++) {
+        size_t n = 0;
+        while (n < sizeof(last_lines[0]) && last_lines[i % 48][n]) ++n;
+        (void)write(STDOUT_FILENO, last_lines[i % 48], n);
+    }
+    _exit(124);
+}
+static void format_trace(char *buf, size_t size, const Trace *t) {
+    snprintf(buf, size, "%" PRIu64 " %04x:%04" PRIx64 " %02x %02x %02x %02x %02x %02x "
            "AX=%04x BX=%04x CX=%04x DX=%04x SI=%04x DI=%04x DS=%04x ES=%04x SS:SP=%04x:%04x FL=%04x CR0=%08x\n",
            t->n, t->cs, t->ip, t->bytes[0], t->bytes[1], t->bytes[2],
            t->bytes[3], t->bytes[4], t->bytes[5], t->ax, t->bx, t->cx, t->dx,
            t->si, t->di, t->ds, t->es, t->ss, t->sp, t->flags, t->cr0);
+}
+static void print_trace(const Trace *t) {
+    char buf[256]; format_trace(buf, sizeof(buf), t); fputs(buf, stdout);
 }
 int main(int argc, char **argv) {
     if (argc != 2) { fprintf(stderr, "usage: %s image\n", argv[0]); return 2; }
@@ -48,8 +68,12 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Cannot start image\n"); return 2;
     }
     Trace ring[48] = {{0}}; unsigned count = 0; int reported = 0; int follow = 0;
+    signal(SIGALRM, timeout_handler);
+    alarm(45);
     for (unsigned i = 0; i < 20000000; i++) {
-        Trace t = capture(m); ring[count++ % 48] = t;
+        Trace t = capture(m); ring[count % 48] = t;
+        format_trace(last_lines[count % 48], sizeof(last_lines[0]), &t);
+        ++count; last_count = (sig_atomic_t)count;
         if (follow > 0) { printf("Transition: "); print_trace(&t); --follow; }
         int disk = t.bytes[0] == 0xcd && t.bytes[1] == 0x13 &&
                    ((t.ax >> 8) == 0x4b || (t.ax >> 8) == 0x42);
