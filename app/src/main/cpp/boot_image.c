@@ -163,9 +163,10 @@ int openxiso_boot_plan(int fd, long long size, OpenXisoBootPlan* plan,
                              error, error_capacity);
         }
         plan->boot_lba = read_le32(entry + 8);
-        plan->boot_sectors = read_le16(entry + 12);
-        if (plan->boot_sectors == 0 || plan->boot_sectors > 8) {
-            plan->boot_sectors = 4; /* стандарт El Torito: 2048 байт */
+        plan->boot_sectors = read_le16(entry + 6);
+        if (plan->boot_sectors == 0) {
+            return fail_plan("В каталоге El Torito указан нулевой размер загрузчика",
+                             error, error_capacity);
         }
         plan->load_segment = read_le16(entry + 2);
         plan->el_torito = 1;
@@ -250,14 +251,8 @@ int openxiso_boot_load(int fd, const OpenXisoBootPlan* plan,
     if (plan == NULL || dest == NULL || fd < 0) {
         return -1;
     }
-    /*
-     * При эмуляции BIOS грузит ровно первый 512-байтный сектор образа:
-     * остальной диск гость читает сам через INT 13h.
-     */
-    const size_t length = (plan->el_torito &&
-                           plan->emulation == OPENXISO_EMULATION_NONE)
-                          ? (size_t)plan->boot_sectors * 512u
-                          : 512u;
+    /* В каталоге El Torito размер загрузки всегда задан в блоках по 512 байт. */
+    const size_t length = plan->el_torito ? (size_t)plan->boot_sectors * 512u : 512u;
     if (length > dest_capacity) {
         set_error("Загрузочный сектор не помещается в область 0000:7C00");
         return -1;

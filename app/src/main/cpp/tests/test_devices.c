@@ -8,6 +8,65 @@
 static int failures;
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #x); ++failures; } } while (0)
 
+static void test_eltorito_status(PcMachine* m) {
+    x86_reset(&m->cpu, m->memory, m->memory_size);
+    memset(&m->plan, 0, sizeof(m->plan));
+    m->plan.el_torito = 1;
+    m->plan.emulation = OPENXISO_EMULATION_NONE;
+    m->plan.drive = 0xe0;
+    m->plan.boot_lba = 0x12345678;
+    m->plan.boot_sectors = 4;
+    m->cpu.sregs[X86_DS] = 0;
+    m->cpu.regs[X86_SI] = 0x600;
+    memset(m->memory + 0x600, 0xcc, 20);
+    m->cpu.regs[X86_AX] = 0x4b01;
+    m->cpu.regs[X86_DX] = 0xe0;
+    m->cpu.flags |= X86_CF;
+    legacy_bios_interrupt(m, 0x13);
+    CHECK(!(m->cpu.flags & X86_CF));
+    CHECK((m->cpu.regs[X86_AX] >> 8) == 0);
+    CHECK(m->memory[0x600] == 0x13 && m->memory[0x601] == 0 && m->memory[0x602] == 0xe0);
+    CHECK(x86_read_physical(&m->cpu, 0x604, 32) == 0x12345678);
+    CHECK(x86_read_physical(&m->cpu, 0x60e, 16) == 4 && m->memory[0x613] == 0xcc);
+    m->cpu.regs[X86_AX] = 0x4b01;
+    m->cpu.regs[X86_DX] = 0x80;
+    legacy_bios_interrupt(m, 0x13);
+    CHECK(m->cpu.flags & X86_CF);
+    CHECK(m->memory[0x602] == 0xe0);
+    m->cpu.regs[X86_AX] = 0x4b00; /* termination is not implemented */
+    m->cpu.regs[X86_DX] = 0xe0;
+    legacy_bios_interrupt(m, 0x13);
+    CHECK(m->cpu.flags & X86_CF);
+    m->plan.el_torito = 0;
+    m->cpu.regs[X86_AX] = 0x4b01;
+    legacy_bios_interrupt(m, 0x13);
+    CHECK(m->cpu.flags & X86_CF);
+}
+
+static void test_eltorito_load_segment(PcMachine* m) {
+    FILE* f = tmpfile();
+    CHECK(f != NULL);
+    if (!f) return;
+    uint8_t data[10 * 512];
+    for (size_t i = 0; i < sizeof(data); ++i) data[i] = (uint8_t)(i / 512);
+    CHECK(fwrite(data, 1, sizeof(data), f) == sizeof(data));
+    CHECK(fflush(f) == 0);
+    x86_reset(&m->cpu, m->memory, m->memory_size);
+    memset(&m->plan, 0, sizeof(m->plan));
+    m->plan.el_torito = 1;
+    m->plan.boot_sectors = 10;
+    m->plan.load_segment = 0x1000;
+    m->plan.drive = 0xe0;
+    int previous_fd = m->fd;
+    m->fd = fileno(f);
+    memset(m->memory + 0x10000, 0xff, sizeof(data));
+    legacy_bios_interrupt(m, 0x19);
+    CHECK(m->cpu.sregs[X86_CS] == 0x1000 && m->cpu.ip == 0);
+    CHECK(!memcmp(m->memory + 0x10000, data, sizeof(data)));
+    m->fd = previous_fd;
+    fclose(f);
+}
+
 static void test_real_exception(PcMachine* m) {
     x86_reset(&m->cpu, m->memory, m->memory_size);
     x86_set_max_mode(&m->cpu, X86_MODE_32);
@@ -219,6 +278,8 @@ int main(void) {
         CHECK(plan.drive == 0 && plan.sectors_per_track == 18 && plan.heads == 2);
         fclose(f);
     }
+    test_eltorito_status(m);
+    test_eltorito_load_segment(m);
     test_real_exception(m);
     test_halt_wakeup(m);
     test_paging(m);

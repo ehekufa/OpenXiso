@@ -293,7 +293,7 @@ static int write_iso(const char* path) {
     entry[0] = 0x88;                                /* загружаемая запись */
     entry[1] = 0x00;                                /* без эмуляции */
     put_le32(entry + 8, 19u);                       /* LBA загрузчика */
-    entry[12] = 4;                                  /* 4 x 512 = 2048 байт */
+    put_le16(entry + 6, 4u);                        /* 4 x 512 = 2048 байт */
 
     memcpy(image + 19u * 2048u, boot_code, sizeof(boot_code));
 
@@ -437,6 +437,8 @@ int main(void) {
         PcMachine* machine = boot_machine(iso_path, &image_fd);
         CHECK(machine != NULL, "машина создана");
         if (machine != NULL) {
+            CHECK(machine->plan.boot_sectors == 4u,
+                  "размер загрузчика прочитан из поля каталога El Torito");
             collect_screen(machine, screen, sizeof(screen));
             CHECK(openxiso_machine_status(machine) == OPENXISO_MACHINE_HALTED,
                   "загрузчик завершился инструкцией HLT");

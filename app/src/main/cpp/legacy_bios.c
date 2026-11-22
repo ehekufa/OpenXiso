@@ -479,6 +479,40 @@ static void bios_disk(PcMachine* machine) {
             legacy_bios_log(machine, "INT 13h: чтение LBA (%s)",
                             openxiso_emulation_name(machine->plan.emulation));
             break;
+        case 0x4B: {                                   /* El Torito: получить статус */
+            if (reg8(machine, 0) != 0x01u || !machine->plan.el_torito ||
+                reg8(machine, 2) != machine->plan.drive) {
+                set_reg8(machine, 4, 0x01u);
+                carry(machine, 1);
+                break;
+            }
+            uint8_t packet[0x13] = {0};
+            packet[0] = sizeof(packet);
+            packet[1] = machine->plan.emulation;
+            packet[2] = machine->plan.drive;
+            for (int i = 0; i < 4; ++i)
+                packet[4 + i] = (uint8_t)(machine->plan.boot_lba >> (8 * i));
+            const uint16_t load_segment = machine->plan.load_segment;
+            packet[0x0c] = (uint8_t)load_segment;
+            packet[0x0d] = (uint8_t)(load_segment >> 8);
+            packet[0x0e] = (uint8_t)machine->plan.boot_sectors;
+            packet[0x0f] = (uint8_t)(machine->plan.boot_sectors >> 8);
+            const uint32_t sectors = machine->plan.sectors_per_track;
+            const uint32_t heads = machine->plan.heads;
+            if (sectors && heads) {
+                uint64_t cylinders = openxiso_disk_total_sectors(&machine->plan) / (sectors * heads);
+                if (cylinders) --cylinders;
+                if (cylinders > 1023) cylinders = 1023;
+                packet[0x10] = (uint8_t)cylinders;
+                packet[0x11] = (uint8_t)((sectors & 0x3fu) | ((cylinders >> 2) & 0xc0u));
+                packet[0x12] = (uint8_t)(heads - 1);
+            }
+            transfer_to_memory(machine, machine->cpu.sregs[X86_DS],
+                               machine->cpu.regs[X86_SI], packet, sizeof(packet));
+            set_reg8(machine, 4, 0);
+            carry(machine, 0);
+            break;
+        }
         case 0x48: {                                   /* параметры EDD */
             const uint16_t segment = machine->cpu.sregs[X86_DS];
             const uint16_t offset = machine->cpu.regs[X86_SI];
@@ -539,9 +573,16 @@ static void bios_keyboard(PcMachine* machine) {
 /* ---------------- INT 19h: передача управления загрузчику ---------------- */
 
 static void bios_bootstrap(PcMachine* machine) {
-    uint8_t* boot_area = machine->memory + OPENXISO_BOOT_ADDRESS;
+    const uint16_t segment = machine->plan.el_torito ? machine->plan.load_segment : 0;
+    const uint32_t address = segment ? (uint32_t)segment << 4 : OPENXISO_BOOT_ADDRESS;
+    /* Не загружать образ поверх VGA/ROM или за пределы памяти машины. */
+    size_t capacity = address < 0xa0000u && address < machine->memory_size
+                      ? (size_t)(0xa0000u - address) : 0;
+    if (capacity && capacity > machine->memory_size - address)
+        capacity = machine->memory_size - address;
+    uint8_t* boot_area = capacity ? machine->memory + address : machine->transfer_buffer;
     const int loaded = openxiso_boot_load(machine->fd, &machine->plan,
-                                          boot_area, 4096u);
+                                          boot_area, capacity);
     if (loaded < 0) {
         snprintf(machine->error, sizeof(machine->error), "%s",
                  openxiso_boot_last_error());
@@ -563,8 +604,8 @@ static void bios_bootstrap(PcMachine* machine) {
     machine->cpu.mode = X86_MODE_16;
     machine->cpu.cr0 = 0u;
     machine->cpu.efer = 0u;
-    machine->cpu.rip = OPENXISO_BOOT_ADDRESS;
-    machine->cpu.seg_base[X86_CS] = 0u;
+    machine->cpu.rip = segment ? 0u : OPENXISO_BOOT_ADDRESS;
+    machine->cpu.seg_base[X86_CS] = (uint32_t)segment << 4;
     machine->cpu.seg_base[X86_DS] = 0u;
     machine->cpu.seg_base[X86_ES] = 0u;
     machine->cpu.seg_base[X86_SS] = 0u;
@@ -574,14 +615,13 @@ static void bios_bootstrap(PcMachine* machine) {
      * передаём напрямую: настоящий BIOS после загрузки MBR делает то же самое —
      * far jmp 0000:7C00.
      */
-    machine->cpu.sregs[X86_CS] = 0x0000u;
-    machine->cpu.ip = OPENXISO_BOOT_ADDRESS;
+    machine->cpu.sregs[X86_CS] = segment;
+    machine->cpu.ip = segment ? 0u : OPENXISO_BOOT_ADDRESS;
     carry(machine, 0);
 
-    legacy_bios_log(machine,
-                    machine->plan.el_torito
-                        ? "El Torito: загрузчик прочитан, управление передано 0000:7C00"
-                        : "MBR: загрузчик прочитан, управление передано 0000:7C00");
+    legacy_bios_log(machine, "%s: загрузчик прочитан, управление передано %04X:%04X",
+                    machine->plan.el_torito ? "El Torito" : "MBR",
+                    machine->cpu.sregs[X86_CS], machine->cpu.ip);
     legacy_bios_log(machine, "Диск: %s, сектор %u байт, DL=%02Xh",
                     machine->plan.el_torito
                         ? openxiso_emulation_name(machine->plan.emulation)
